@@ -1,13 +1,18 @@
 "use client";
 
-import { use, useState, useEffect, useRef, Suspense } from "react";
+import { use, useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { loadMuted, makeSounds, saveMuted } from "../../table/_shared/sounds";
+import {
+  ActionButton, AnimatedAmount, Card, CommunitySlot, FlashBanner, PotDisplay, WinBurst,
+} from "../../table/_shared/ui";
+import type { CardData, FlyFrom, Suit } from "../../table/_shared/ui";
+import { OpponentSeat } from "../../table/_shared/seat";
+import { OVAL_DESKTOP, OVAL_MOBILE, SCENE_H, SCENE_W, useFitScale, useIsMobile } from "../../table/_shared/useFitScale";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Suit = "♠" | "♥" | "♦" | "♣";
-interface CardData { value: string; suit: Suit; }
 type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
 type Action = "waiting" | "fold" | "call" | "check" | "raise" | "bet" | "allin";
 
@@ -430,151 +435,24 @@ function processAIAction(state: TGame): TGame {
   return processAction(state, actorIdx, state.currentBet === 0 ? "bet" : "raise", raiseTo);
 }
 
-// ─── Sound System ─────────────────────────────────────────────────────────────
+// ─── Deal geometry ────────────────────────────────────────────────────────────
 
-function makeSounds(mutedRef: React.MutableRefObject<boolean>) {
-  let ctx: AudioContext | null = null;
-  function getCtx() {
-    if (typeof window === "undefined") return null;
-    if (!ctx) try { ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)(); } catch { return null; }
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-    return ctx;
-  }
-  function beep(freq: number, dur: number, type: OscillatorType = "sine", vol = 0.22) {
-    if (mutedRef.current) return;
-    const c = getCtx(); if (!c) return;
-    try {
-      const osc = c.createOscillator(); const gain = c.createGain();
-      osc.connect(gain); gain.connect(c.destination);
-      osc.type = type; osc.frequency.value = freq;
-      gain.gain.setValueAtTime(vol, c.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-      osc.start(c.currentTime); osc.stop(c.currentTime + dur);
-    } catch {}
-  }
+// Cards converge on each seat from the middle of the felt. Seat layouts vary
+// with the table size, so the origin is derived from which edge a seat sits on
+// rather than hard-coded per position.
+function flyFor(pos: React.CSSProperties): FlyFrom {
+  const onRight = pos.right !== undefined;
+  const onLeft  = pos.left  !== undefined && pos.left !== "50%";
+  const onTop   = pos.top   !== undefined;
   return {
-    deal() {
-      if (mutedRef.current) return;
-      const c = getCtx(); if (!c) return;
-      try {
-        const len = Math.floor(c.sampleRate * 0.065);
-        const buf = c.createBuffer(1, len, c.sampleRate);
-        const d = buf.getChannelData(0);
-        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) * 0.4;
-        const src = c.createBufferSource(); src.buffer = buf;
-        const g = c.createGain(); g.gain.value = 0.45;
-        src.connect(g); g.connect(c.destination); src.start();
-      } catch {}
-    },
-    chip()  { beep(850, 0.055, "square", 0.1); },
-    win()   { if (!mutedRef.current) [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.28, "sine", 0.18), i * 110)); },
-    fold()  { beep(140, 0.16, "triangle", 0.18); },
-    timer() { beep(880, 0.07, "square", 0.09); },
+    x: onRight ? -250 : onLeft ? 250 : 0,
+    y: onTop ? 130 : -165,
+    r: onRight ? 20 : -20,
   };
 }
 
-// ─── Card Component ────────────────────────────────────────────────────────────
-
-function Card({ card, faceDown = false, size = "md", dealAnim = false, dealDelay = 0, flipAnim = false, flipDelay = 0, isWinner = false }: {
-  card?: CardData | null; faceDown?: boolean; size?: "sm" | "md" | "lg";
-  dealAnim?: boolean; dealDelay?: number; flipAnim?: boolean; flipDelay?: number; isWinner?: boolean;
-}) {
-  const dims = { sm: { w: 30, h: 44, corner: 9, suit: 13, pad: 2, r: 4 }, md: { w: 52, h: 72, corner: 12, suit: 22, pad: 4, r: 6 }, lg: { w: 84, h: 118, corner: 20, suit: 46, pad: 6, r: 8 } }[size];
-  const animClass = dealAnim ? "card-deal" : flipAnim ? "card-flip" : "";
-  const base: React.CSSProperties = { width: dims.w, height: dims.h, borderRadius: dims.r, flexShrink: 0, ...(dealAnim && dealDelay > 0 ? { animationDelay: `${dealDelay}ms` } : flipAnim && flipDelay > 0 ? { animationDelay: `${flipDelay}ms` } : {}) };
-  if (!card || faceDown) return (
-    <div className={animClass} style={{ ...base, background: "linear-gradient(155deg,#1e3a8a 0%,#1e40af 55%,#1e3a8a 100%)", border: "1.5px solid rgba(200,210,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.5)", backgroundImage: "repeating-linear-gradient(45deg,rgba(255,255,255,0.04) 0,rgba(255,255,255,0.04) 2px,transparent 0,transparent 50%)", backgroundSize: "8px 8px" }}>
-      <span style={{ color: "rgba(200,220,255,0.22)", fontSize: dims.corner - 1, fontWeight: 900 }}>PS</span>
-    </div>
-  );
-  const isRed = card.suit === "♥" || card.suit === "♦";
-  const col = isRed ? "#dc2626" : "#111827";
-  return (
-    <div className={[animClass, isWinner ? "card-winner" : ""].filter(Boolean).join(" ")} style={{ ...base, background: "white", padding: dims.pad, border: isWinner ? "2px solid #c9a227" : "1px solid #e5e7eb", boxShadow: isWinner ? "0 4px 12px rgba(0,0,0,0.5),0 0 20px rgba(201,162,39,0.5)" : "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-      <span style={{ fontSize: dims.corner, fontWeight: 900, lineHeight: 1, color: col }}>{card.value}</span>
-      <span style={{ fontSize: dims.suit, textAlign: "center", lineHeight: 1, color: col, display: "block" }}>{card.suit}</span>
-      <span style={{ fontSize: dims.corner, fontWeight: 900, lineHeight: 1, color: col, transform: "rotate(180deg)", alignSelf: "flex-end", display: "block" }}>{card.value}</span>
-    </div>
-  );
-}
-
-function CommunitySlot({ card, label, flipDelay = 0 }: { card: CardData | null; label: string; flipDelay?: number }) {
-  if (!card) return (
-    <div style={{ width: 52, height: 72, borderRadius: 6, flexShrink: 0, border: "2px dashed rgba(255,255,255,0.1)", background: "rgba(0,0,0,0.18)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <span style={{ color: "rgba(255,255,255,0.2)", fontSize: 9, fontWeight: 700 }}>{label}</span>
-    </div>
-  );
-  return <Card card={card} size="md" flipAnim flipDelay={flipDelay} />;
-}
-
-// ─── OpponentSeat ─────────────────────────────────────────────────────────────
-
-function OpponentSeat({ player, pos, showCards, isCurrentTurn, isWinner }: {
-  player: TPlayer; pos: React.CSSProperties; showCards: boolean; isCurrentTurn: boolean; isWinner: boolean;
-}) {
-  if (player.eliminated) {
-    return (
-      <div className="absolute flex flex-col items-center gap-1" style={{ ...pos, zIndex: 20, opacity: 0.25 }}>
-        <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#111", border: "2px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 8, color: "#4b5563", fontWeight: 900, letterSpacing: 1 }}>OUT</span>
-        </div>
-        <div style={{ background: "rgba(0,0,0,0.7)", borderRadius: 6, padding: "2px 6px" }}>
-          <span style={{ color: "#374151", fontSize: 10, fontWeight: 700 }}>{player.name}</span>
-        </div>
-      </div>
-    );
-  }
-
-  const actionLabel: Record<Action, string> = { waiting: "", fold: "FOLDED", call: "CALL", check: "CHECK", raise: "RAISE", bet: "BET", allin: "ALL IN" };
-  const borderCol = isWinner ? "#c9a227" : isCurrentTurn ? "#f59e0b" : player.folded ? "#2d3748" : "#4b5563";
-  const glow = isWinner ? "0 0 0 3px rgba(201,162,39,0.55),0 0 24px rgba(201,162,39,0.45)" : isCurrentTurn ? "0 0 0 3px rgba(245,158,11,0.5),0 0 20px rgba(245,158,11,0.4)" : undefined;
-
-  return (
-    <div className={`absolute flex flex-col items-center gap-1 ${isWinner ? "winner-seat" : ""}`} style={{ ...pos, zIndex: 20 }}>
-      {isCurrentTurn && !player.folded && (
-        <div className="animate-pulse" style={{ background: "#f59e0b", color: "#000", fontWeight: 900, fontSize: 9, padding: "2px 8px", borderRadius: 4, letterSpacing: 1 }}>THINKING…</div>
-      )}
-      {isWinner && <div style={{ background: "#c9a227", color: "#000", fontWeight: 900, fontSize: 9, padding: "2px 7px", borderRadius: 4, letterSpacing: 1 }}>WINNER!</div>}
-
-      <div style={{ position: "relative", width: 56, height: 56 }}>
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: player.folded ? "#1f2937" : "linear-gradient(145deg,#374151,#4b5563)", border: `3px solid ${borderCol}`, boxShadow: glow, opacity: player.folded ? 0.42 : 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, overflow: "hidden", transition: "border-color 0.3s,box-shadow 0.3s" }}>
-          {player.avatar}
-          {player.folded && <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 8, fontWeight: 900, color: "#9ca3af", letterSpacing: 1 }}>FOLDED</span></div>}
-        </div>
-        {(player.isDealer || player.isSB || player.isBB) && (
-          <div style={{ position: "absolute", bottom: -4, right: -4, display: "flex", gap: 2 }}>
-            {player.isDealer && <span style={{ background: "#c9a227", color: "#000", fontWeight: 900, fontSize: 7, padding: "1px 3px", borderRadius: 3 }}>D</span>}
-            {player.isSB    && <span style={{ background: "#6b7280", color: "white", fontWeight: 900, fontSize: 7, padding: "1px 3px", borderRadius: 3 }}>SB</span>}
-            {player.isBB    && <span style={{ background: "#374151", color: "white", fontWeight: 900, fontSize: 7, padding: "1px 3px", borderRadius: 3 }}>BB</span>}
-          </div>
-        )}
-      </div>
-
-      <div style={{ background: isWinner ? "rgba(201,162,39,0.18)" : "rgba(0,0,0,0.82)", backdropFilter: "blur(8px)", border: `1px solid ${isWinner ? "rgba(201,162,39,0.5)" : isCurrentTurn ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.05)"}`, borderRadius: 7, padding: "3px 7px", display: "flex", flexDirection: "column", alignItems: "center", opacity: player.folded ? 0.45 : 1, transition: "all 0.3s" }}>
-        <span style={{ color: isWinner ? "#f59e0b" : "white", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap" }}>{player.name}</span>
-        <span style={{ color: "#fbbf24", fontWeight: 900, fontSize: 10 }}>${player.chips.toLocaleString()}</span>
-        {player.isAllIn && !player.folded && <span style={{ color: "#ef4444", fontSize: 9, fontWeight: 900 }}>ALL IN</span>}
-        {!player.isAllIn && player.action !== "waiting" && !player.folded && <span style={{ color: player.action === "fold" ? "#6b7280" : "#34d399", fontSize: 9, fontWeight: 700 }}>{actionLabel[player.action]}</span>}
-      </div>
-
-      {!player.folded && (
-        <div style={{ display: "flex", gap: 2, flexWrap: "wrap", justifyContent: "center", maxWidth: 62 }}>
-          {player.cards.map((c, i) => (
-            <div key={i} className={player.folded ? "card-fold" : ""}>
-              <Card card={showCards ? c : null} faceDown={!showCards} size="sm" isWinner={isWinner && showCards} />
-            </div>
-          ))}
-        </div>
-      )}
-      {player.streetBet > 0 && !player.folded && (
-        <div className="chip-slide" style={{ display: "flex", alignItems: "center", gap: 3, marginTop: 2 }}>
-          <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#f59e0b", fontSize: 7, fontWeight: 900, color: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>$</div>
-          <span style={{ color: "#fcd34d", fontSize: 10, fontWeight: 700 }}>${player.streetBet}</span>
-        </div>
-      )}
-    </div>
-  );
-}
+// Milliseconds between consecutive cards leaving the dealer's hand.
+const DEAL_STRIDE = 70;
 
 // ─── Tournament Header ─────────────────────────────────────────────────────────
 
@@ -662,19 +540,38 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
   const config = CONFIGS[id] ?? CONFIGS["1"];
   const { numSeats, prizePool, name } = config;
 
+  // The deck is shuffled with Math.random() in a state initialiser, so the
+  // server HTML can never match the client's first render. Hold the table back
+  // until after mount and render a matching placeholder on both sides.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // The felt is scaled to the measured height of the area left between the
+  // header and the action bar, so nothing can be clipped at any viewport.
+  const isMobile = useIsMobile();
+  const { ref: tableAreaRef, scale: tableScale } = useFitScale(isMobile ? OVAL_MOBILE : OVAL_DESKTOP);
+
+  // Mute is loaded after mount — localStorage does not exist during SSR — and
+  // shares its key with the cash tables, so muting once mutes everywhere.
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
+  useEffect(() => { setMuted(loadMuted()); }, []);
   const sounds = useRef(makeSounds(mutedRef));
+
+  const toggleMute = useCallback(() => {
+    setMuted(m => { saveMuted(!m); return !m; });
+    sounds.current.unlock();
+  }, []);
 
   const [game, setGame] = useState<TGame>(() =>
     buildTournamentHand(1, makeTournamentPlayers(numSeats), -1, BLIND_LEVELS[0])
   );
   const [raiseAmt, setRaiseAmt] = useState(4);
-  const [dealTick, setDealTick] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
   const [blindLevel, setBlindLevel] = useState(0);
   const [levelSeconds, setLevelSeconds] = useState(0);
+  const [levelFlash, setLevelFlash] = useState<string | null>(null);
   const [tournamentStatus, setTournamentStatus] = useState<{ phase: "won" | "lost"; place: number; prize: number } | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -698,17 +595,26 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
     setRaiseAmt(prev => Math.max(betRaiseMin, Math.min(prev, betRaiseMax)));
   }, [game.street, game.handNum, game.currentBet, betRaiseMin, betRaiseMax]);
 
-  // Deal sounds
+  // One swoosh per card, on the same clock as the deal animation so each sound
+  // lands with its card. Cleared on unmount so a fast next hand cannot stack
+  // two hands' worth of deal sounds.
   useEffect(() => {
-    setDealTick(t => t + 1);
-    for (let i = 0; i < 10; i++) setTimeout(() => sounds.current.deal(), i * 180 + 50);
+    const live = game.players.filter(p => !p.eliminated).length;
+    const ids = Array.from({ length: live * 2 }, (_, i) =>
+      setTimeout(() => sounds.current.deal(), i * DEAL_STRIDE + 40));
+    return () => ids.forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.handNum]);
 
-  // Win sound
+  // Win + street sounds
   const prevStreet = useRef<Street>("preflop");
   useEffect(() => {
     if (game.street !== prevStreet.current) {
       prevStreet.current = game.street;
+      // Board card hitting the felt — bigger, wider whoosh than a hole card.
+      if (game.street === "flop" || game.street === "turn" || game.street === "river") {
+        sounds.current.reveal();
+      }
       if (game.street === "showdown" && isHeroWinner) sounds.current.win();
     }
   });
@@ -734,14 +640,20 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (heroAwayRef.current) { foldRef.current(); return 30; }
-        if (prev === 8) sounds.current.timer();
         if (prev <= 1) { foldRef.current(); return 30; }
         return prev - 1;
       });
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHeroTurn, game.activeIdx, game.handNum, tournamentStatus]);
+
+  // Urgent countdown: a beep every second inside the last ten, climbing in
+  // pitch as the clock runs out. Driven off the rendered value rather than the
+  // interval so a re-entrant state updater can never double-fire it.
+  useEffect(() => {
+    if (!isHeroTurn || timeLeft > 10 || timeLeft <= 0) return;
+    sounds.current.timer(1 - timeLeft / 10);
+  }, [timeLeft, isHeroTurn]);
 
   // AI turns
   useEffect(() => {
@@ -757,6 +669,7 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
         const prevAction = prev.players[idx].action;
         const nextAction = next.players[idx].action;
         if (nextAction === "fold") sounds.current.fold();
+        else if (nextAction === "allin") sounds.current.allin();
         else if (nextAction !== prevAction) sounds.current.chip();
         return next;
       });
@@ -777,6 +690,23 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
     }, 1000);
     return () => clearInterval(id);
   }, []);
+
+  // "Blinds increased to $4/$8!" — announce every level change after the first.
+  const prevBlindLevel = useRef(0);
+  useEffect(() => {
+    if (blindLevel === prevBlindLevel.current) return;
+    prevBlindLevel.current = blindLevel;
+    const bl = BLIND_LEVELS[blindLevel];
+    setLevelFlash(`Blinds increased to $${bl.sb}/$${bl.bb}!`);
+    sounds.current.levelUp();
+  }, [blindLevel]);
+
+  // Bust-out sting whenever the field shrinks.
+  const prevRemaining = useRef(numSeats);
+  useEffect(() => {
+    if (playersRemaining < prevRemaining.current) sounds.current.eliminate();
+    prevRemaining.current = playersRemaining;
+  }, [playersRemaining]);
 
   // Page visibility → auto-fold when away
   useEffect(() => {
@@ -810,12 +740,14 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
   function heroBetRaise() {
     if (!isHeroTurn) return;
     const amt = Math.max(betRaiseMin, Math.min(raiseAmt, betRaiseMax));
-    sounds.current.chip();
+    // Sliding the bet all the way up is a shove, and should sound like one.
+    if (amt >= hero.chips + hero.streetBet) sounds.current.allin();
+    else sounds.current.chip();
     setGame(prev => processAction(prev, 0, game.currentBet === 0 ? "bet" : "raise", amt));
   }
   function heroAllIn() {
     if (!isHeroTurn) return;
-    sounds.current.chip();
+    sounds.current.allin();
     setGame(prev => processAction(prev, 0, game.currentBet === 0 ? "bet" : "raise", hero.chips + hero.streetBet));
   }
   function newHand() {
@@ -832,8 +764,12 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
   const timerRadius = 22, timerCirc = 2 * Math.PI * timerRadius, timerDash = (timeLeft / 30) * timerCirc;
   const levelSecondsLeft = LEVEL_DURATION - levelSeconds;
 
+  // Must sit below every hook — an early return above them would change the
+  // hook count between the pre-mount and post-mount renders.
+  if (!mounted) return <div style={{ background: "#060d08", height: "100vh" }} />;
+
   return (
-    <div className="h-screen text-white flex flex-col overflow-hidden" style={{ background: "#060d08", userSelect: "none" }}>
+    <div className="h-[100dvh] text-white flex flex-col overflow-hidden" style={{ background: "#060d08", userSelect: "none" }}>
 
       <TournamentHeader
         prizePool={prizePool}
@@ -842,26 +778,24 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
         blindLevel={blindLevel}
         levelSecondsLeft={levelSecondsLeft}
         muted={muted}
-        onToggleMute={() => setMuted(m => !m)}
+        onToggleMute={toggleMute}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
         <main className="flex-1 flex flex-col overflow-hidden">
 
           {/* Table scene */}
-          <div className="flex-1 relative overflow-hidden">
+          <div ref={tableAreaRef} className="table-area flex-1 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse at 50% 60%,#0d1f11 0%,#060d08 100%)" }} />
-            <div className="absolute inset-0 flex items-start justify-center pt-1 md:items-center md:pt-0">
-              <div className="table-scene relative" style={{ width: 800, height: 440 }}>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="table-scene relative" style={{width:SCENE_W,height:SCENE_H,transform:`scale(${tableScale})`}}>
 
-                {/* Felt */}
-                <div className="absolute" style={{ left: 70, top: 55, width: 660, height: 330, borderRadius: "50%", background: "linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)", boxShadow: ["0 0 0 3px #c9a227", "0 0 0 7px #1e1200", "0 40px 130px rgba(0,0,0,0.95)", "inset 0 2px 6px rgba(255,200,50,0.08)"].join(",") }}>
+                {/* Felt — gold rail, green bloom off the edge, woven overlay */}
+                <div className="absolute table-glow" style={{ left: 70, top: 55, width: 660, height: 330, borderRadius: "50%", background: "linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)", boxShadow: ["0 0 0 3px #c9a227", "0 0 0 7px #1e1200", "0 40px 130px rgba(0,0,0,0.95)", "inset 0 2px 6px rgba(255,200,50,0.08)"].join(",") }}>
                   <div className="absolute" style={{ inset: 10, borderRadius: "50%", background: "linear-gradient(155deg,#1c2a00,#162200,#1c2a00)" }}>
-                    <div className="absolute" style={{ inset: 16, borderRadius: "50%", background: "radial-gradient(ellipse at 45% 38%,#235f35 0%,#1a4a2a 52%,#0f3019 100%)", boxShadow: "inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)" }}>
+                    <div className="absolute felt-texture" style={{ inset: 16, borderRadius: "50%", background: "radial-gradient(ellipse at 45% 38%,#235f35 0%,#1a4a2a 52%,#0f3019 100%)", boxShadow: "inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)" }}>
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                        <span className="font-black tracking-wide" style={{ color: "#f59e0b", fontSize: 20, textShadow: "0 2px 10px rgba(0,0,0,0.7)" }}>
-                          Pot: ${game.pot.toLocaleString()}
-                        </span>
+                        <PotDisplay pot={game.pot} />
                         {game.sidePots.length > 0 && (
                           <div className="flex gap-2">
                             {game.sidePots.map((sp, i) => (
@@ -883,15 +817,32 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 </div>
 
-                {/* Opponent seats */}
-                {opponents.map((p, i) => (
-                  <OpponentSeat
-                    key={p.id} player={p} pos={seatPositions[i] ?? { right: 60, top: 20 }}
-                    showCards={isShowdown && !p.folded}
-                    isCurrentTurn={game.activeIdx === p.id && !game.phaseDelay}
-                    isWinner={game.winnerIds.includes(p.id)}
-                  />
-                ))}
+                {/* Opponent seats. Cards fly out from the middle of the felt,
+                    one seat at a time, in the order a dealer would pitch them.
+                    Busted players fade out in place. */}
+                {opponents.map((p, i) => {
+                  const pos = seatPositions[i] ?? { right: 60, top: 20 };
+                  return (
+                    <OpponentSeat
+                      key={p.id} player={p} pos={pos}
+                      showCards={isShowdown && !p.folded}
+                      isCurrentTurn={game.activeIdx === p.id && !game.phaseDelay}
+                      isWinner={game.winnerIds.includes(p.id)}
+                      compact
+                      fly={flyFor(pos)}
+                      dealDelay={p.id * DEAL_STRIDE}
+                      dealStride={game.numSeats * DEAL_STRIDE}
+                    />
+                  );
+                })}
+
+                {/* Gold burst when the hero takes down the pot */}
+                {isShowdown && isHeroWinner && <WinBurst />}
+
+                {/* "Blinds increased to $4/$8!" */}
+                {levelFlash && !tournamentStatus && (
+                  <FlashBanner message={levelFlash} onDone={() => setLevelFlash(null)} />
+                )}
 
                 {/* Hero seat */}
                 <div className="absolute flex flex-col items-center gap-1" style={{ bottom: 0, left: "50%", transform: "translateX(-50%)" }}>
@@ -916,7 +867,7 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                     <span className="text-lg leading-none">{hero.avatar}</span>
                     <span style={{ color: isHeroWinner ? "#f59e0b" : "#fbbf24", fontWeight: 900, fontSize: 12 }}>You</span>
                     <span style={{ color: "#374151", fontSize: 11 }}>·</span>
-                    <span style={{ color: "#f3f4f6", fontWeight: 700, fontSize: 12 }}>${hero.chips.toLocaleString()}</span>
+                    <AnimatedAmount value={hero.chips} style={{ color: "#f3f4f6", fontWeight: 700, fontSize: 12 }} />
                     {hero.streetBet > 0 && <><span style={{ color: "#374151", fontSize: 11 }}>·</span><span style={{ color: "#fcd34d", fontSize: 11 }}>Bet ${hero.streetBet}</span></>}
                     {hero.folded && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 900 }}>· FOLDED</span>}
                     {!hero.folded && hero.isAllIn && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 900 }}>· ALL IN</span>}
@@ -961,10 +912,20 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
               )}
 
+              {/* Hero hole cards: pitched in from the felt, then flipped face
+                  up in 3D once they land. */}
               <div className="flex gap-1.5 md:gap-2 items-end">
                 {hero.cards.map((c, i) => (
                   <div key={`${game.handNum}-${i}`} style={{ transform: i === 0 ? "rotate(-5deg) translateY(4px)" : "rotate(5deg) translateY(4px)", transition: "transform 0.2s" }}>
-                    <Card card={c} size="lg" dealAnim dealDelay={i * 120} isWinner={isHeroWinner && isShowdown} />
+                    <Card
+                      card={c}
+                      size="lg"
+                      fly={{ x: 0, y: -280, r: 12 }}
+                      delay={i * game.numSeats * DEAL_STRIDE}
+                      reveal
+                      isWinner={isHeroWinner && isShowdown}
+                      className={hero.folded ? "card-fold" : ""}
+                    />
                   </div>
                 ))}
               </div>
@@ -1003,33 +964,18 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
               </div>
             ) : (
               <div className="flex items-stretch gap-2 md:gap-3 justify-center flex-wrap action-bar">
-                <button onClick={heroFold} disabled={!isHeroTurn}
-                  className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                  data-tip="Discard your hand"
-                  style={{ background: "#7f1d1d", color: "#fecaca", boxShadow: "0 4px 14px rgba(127,29,29,0.45)" }}
-                  onMouseEnter={e => { if (isHeroTurn) { e.currentTarget.style.background = "#991b1b"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#7f1d1d"; e.currentTarget.style.transform = ""; }}>
+                <ActionButton tone="fold" onClick={heroFold} disabled={!isHeroTurn} tip="Discard your hand">
                   Fold
-                </button>
+                </ActionButton>
 
                 {isBetCtx ? (
-                  <button onClick={heroCheck} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                    data-tip="Pass action without betting"
-                    style={{ background: "#1f2937", color: "#d1d5db", boxShadow: "0 4px 12px rgba(0,0,0,0.4)" }}
-                    onMouseEnter={e => { if (isHeroTurn) { e.currentTarget.style.background = "#374151"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#1f2937"; e.currentTarget.style.transform = ""; }}>
+                  <ActionButton tone="check" onClick={heroCheck} disabled={!isHeroTurn} tip="Pass action without betting">
                     Check
-                  </button>
+                  </ActionButton>
                 ) : (
-                  <button onClick={heroCall} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                    data-tip={`Match the current bet`}
-                    style={{ background: "#14532d", color: "#bbf7d0", boxShadow: "0 4px 14px rgba(20,83,45,0.45)" }}
-                    onMouseEnter={e => { if (isHeroTurn) { e.currentTarget.style.background = "#166534"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#14532d"; e.currentTarget.style.transform = ""; }}>
+                  <ActionButton tone="call" onClick={heroCall} disabled={!isHeroTurn} tip="Match the current bet">
                     Call ${callAmt.toLocaleString()}
-                  </button>
+                  </ActionButton>
                 )}
 
                 <div className="flex items-center gap-2 md:gap-3 rounded-xl px-3 md:px-4 py-2" style={{ background: "#0f1a12", border: "1px solid #2d4a3a" }}>
@@ -1052,22 +998,13 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                       </button>
                     ))}
                   </div>
-                  <button onClick={heroBetRaise} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-4 md:px-5 py-2 md:py-2.5 whitespace-nowrap transition-all disabled:opacity-40 action-btn"
-                    data-tip={isBetCtx ? "Open the betting" : "Raise the current bet"}
-                    style={{ background: "#b45309", color: "#fef3c7", boxShadow: "0 4px 14px rgba(180,83,9,0.45)" }}
-                    onMouseEnter={e => { if (isHeroTurn) { e.currentTarget.style.background = "#d97706"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#b45309"; e.currentTarget.style.transform = ""; }}>
+                  <ActionButton tone="raise" onClick={heroBetRaise} disabled={!isHeroTurn}
+                    tip={isBetCtx ? "Open the betting" : "Raise the current bet"}>
                     {isBetCtx ? "Bet" : "Raise"}
-                  </button>
-                  <button onClick={heroAllIn} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-xs px-3 py-2 whitespace-nowrap transition-all disabled:opacity-40"
-                    data-tip="Go all-in"
-                    style={{ background: "#450a0a", color: "#fca5a5", border: "1px solid #7f1d1d" }}
-                    onMouseEnter={e => { if (isHeroTurn) e.currentTarget.style.background = "#7f1d1d"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#450a0a"; }}>
+                  </ActionButton>
+                  <ActionButton tone="allin" onClick={heroAllIn} disabled={!isHeroTurn} compact tip="Go all-in">
                     All-in
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
             )}

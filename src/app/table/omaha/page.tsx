@@ -1,14 +1,19 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ChatSidebar from "../ChatSidebar";
+import { loadMuted, makeSounds, saveMuted } from "../_shared/sounds";
+import {
+  ActionButton, AnimatedAmount, Card, CommunitySlot, PotDisplay, WinBurst,
+} from "../_shared/ui";
+import type { CardData, FlyFrom, Suit } from "../_shared/ui";
+import { BetPill, OpponentSeat } from "../_shared/seat";
+import { OVAL_DESKTOP, OVAL_MOBILE, SCENE_H, SCENE_W, useFitScale, useIsMobile } from "../_shared/useFitScale";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Suit = "♠" | "♥" | "♦" | "♣";
 type GameVariant = "holdem" | "omaha";
-interface CardData { value: string; suit: Suit; }
 type Street = "preflop" | "flop" | "turn" | "river" | "showdown";
 type Action = "waiting" | "fold" | "call" | "check" | "raise" | "bet" | "allin";
 
@@ -383,129 +388,7 @@ function buildInitialState(handNum: number, prevPlayers?: PlayerState[], prevLog
   };
 }
 
-// ─── Sound System ─────────────────────────────────────────────────────────────
-
-function makeSounds(mutedRef: React.MutableRefObject<boolean>) {
-  let ctx: AudioContext|null = null;
-  function getCtx(): AudioContext|null {
-    if (typeof window==="undefined") return null;
-    if (!ctx) {
-      try { ctx = new (window.AudioContext||(window as unknown as {webkitAudioContext:typeof AudioContext}).webkitAudioContext)(); }
-      catch { return null; }
-    }
-    if (ctx.state==="suspended") ctx.resume().catch(()=>{});
-    return ctx;
-  }
-  function beep(freq:number, dur:number, type:OscillatorType="sine", vol=0.22) {
-    if (mutedRef.current) return;
-    const c=getCtx(); if (!c) return;
-    try {
-      const osc=c.createOscillator(); const gain=c.createGain();
-      osc.connect(gain); gain.connect(c.destination);
-      osc.type=type; osc.frequency.value=freq;
-      gain.gain.setValueAtTime(vol,c.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+dur);
-      osc.start(c.currentTime); osc.stop(c.currentTime+dur);
-    } catch {}
-  }
-  return {
-    deal() {
-      if (mutedRef.current) return;
-      const c=getCtx(); if (!c) return;
-      try {
-        const len=Math.floor(c.sampleRate*0.065);
-        const buf=c.createBuffer(1,len,c.sampleRate);
-        const d=buf.getChannelData(0);
-        for (let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len)*0.4;
-        const src=c.createBufferSource(); src.buffer=buf;
-        const gain=c.createGain(); gain.gain.value=0.45;
-        src.connect(gain); gain.connect(c.destination); src.start();
-      } catch {}
-    },
-    chip()  { beep(850,0.055,"square",0.1); },
-    win()   {
-      if (mutedRef.current) return;
-      [523,659,784,1047].forEach((f,i) => setTimeout(()=>beep(f,0.28,"sine",0.18),i*110));
-    },
-    fold()  { beep(140,0.16,"triangle",0.18); },
-    timer() { beep(880,0.07,"square",0.09); },
-  };
-}
-
-// ─── Card Component ────────────────────────────────────────────────────────────
-
-function Card({ card, faceDown=false, size="md",
-  dealAnim=false, dealDelay=0,
-  flipAnim=false, flipDelay=0,
-  isWinner=false,
-}: {
-  card?: CardData|null; faceDown?: boolean; size?: "sm"|"md"|"lg";
-  dealAnim?: boolean; dealDelay?: number;
-  flipAnim?: boolean; flipDelay?: number;
-  isWinner?: boolean;
-}) {
-  const dims = {
-    sm: {w:30,h:44,corner:9, suit:13,pad:2,r:4},
-    md: {w:52,h:72,corner:12,suit:22,pad:4,r:6},
-    lg: {w:84,h:118,corner:20,suit:46,pad:6,r:8},
-  }[size];
-
-  const animClass = dealAnim ? "card-deal" : flipAnim ? "card-flip" : "";
-  const winnerClass = isWinner ? "card-winner" : "";
-
-  const base: React.CSSProperties = {
-    width:dims.w, height:dims.h, borderRadius:dims.r, flexShrink:0,
-    ...(dealAnim && dealDelay > 0 ? { animationDelay:`${dealDelay}ms` } :
-        flipAnim && flipDelay > 0 ? { animationDelay:`${flipDelay}ms` } : {}),
-  };
-
-  if (!card||faceDown) return (
-    <div className={animClass} style={{
-      ...base,
-      background:"linear-gradient(155deg,#1e3a8a 0%,#1e40af 55%,#1e3a8a 100%)",
-      border:"1.5px solid rgba(200,210,255,0.25)",
-      display:"flex",alignItems:"center",justifyContent:"center",
-      boxShadow:"0 2px 8px rgba(0,0,0,0.5)",
-      backgroundImage:"repeating-linear-gradient(45deg,rgba(255,255,255,0.04) 0,rgba(255,255,255,0.04) 2px,transparent 0,transparent 50%)",
-      backgroundSize:"8px 8px",
-    }}>
-      <span style={{color:"rgba(200,220,255,0.22)",fontSize:dims.corner-1,fontWeight:900}}>PS</span>
-    </div>
-  );
-
-  const isRed = card.suit==="♥"||card.suit==="♦";
-  const col = isRed?"#dc2626":"#111827";
-
-  return (
-    <div
-      className={[animClass, winnerClass].filter(Boolean).join(" ")}
-      style={{
-        ...base,
-        background:"white", padding:dims.pad,
-        border:isWinner?"2px solid #c9a227":"1px solid #e5e7eb",
-        boxShadow:isWinner
-          ?"0 4px 12px rgba(0,0,0,0.5),0 0 20px rgba(201,162,39,0.5)"
-          :"0 4px 12px rgba(0,0,0,0.5)",
-        display:"flex",flexDirection:"column",justifyContent:"space-between",
-      }}
-    >
-      <span style={{fontSize:dims.corner,fontWeight:900,lineHeight:1,color:col}}>{card.value}</span>
-      <span style={{fontSize:dims.suit,textAlign:"center",lineHeight:1,color:col,display:"block"}}>{card.suit}</span>
-      <span style={{fontSize:dims.corner,fontWeight:900,lineHeight:1,color:col,transform:"rotate(180deg)",alignSelf:"flex-end",display:"block"}}>{card.value}</span>
-    </div>
-  );
-}
-
-function CommunitySlot({ card, label, flipDelay=0 }: { card:CardData|null; label:string; flipDelay?:number }) {
-  if (!card) return (
-    <div style={{width:52,height:72,borderRadius:6,flexShrink:0,border:"2px dashed rgba(255,255,255,0.1)",background:"rgba(0,0,0,0.18)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <span style={{color:"rgba(255,255,255,0.2)",fontSize:9,fontWeight:700}}>{label}</span>
-    </div>
-  );
-  return <Card card={card} size="md" flipAnim flipDelay={flipDelay} />;
-}
-
-// ─── OpponentSeat ─────────────────────────────────────────────────────────────
+// ─── Seat geometry ────────────────────────────────────────────────────────────
 
 const SEAT_POS: React.CSSProperties[] = [
   { right:60, bottom:18 },
@@ -514,95 +397,21 @@ const SEAT_POS: React.CSSProperties[] = [
   { left:70,  bottom:18 },
 ];
 
-function OpponentSeat({ player, pos, showCards, isCurrentTurn, isWinner }: {
-  player:PlayerState; pos:React.CSSProperties;
-  showCards:boolean; isCurrentTurn:boolean; isWinner:boolean;
-}) {
-  const { folded } = player;
-  const actionLabel: Record<Action,string> = {
-    waiting:"",fold:"FOLDED",call:"CALL",check:"CHECK",raise:"RAISE",bet:"BET",allin:"ALL IN",
-  };
-  const borderCol = isWinner?"#c9a227":isCurrentTurn?"#f59e0b":folded?"#2d3748":"#4b5563";
-  const glow = isWinner
-    ? "0 0 0 3px rgba(201,162,39,0.55),0 0 24px rgba(201,162,39,0.45)"
-    : isCurrentTurn?"0 0 0 3px rgba(245,158,11,0.5),0 0 20px rgba(245,158,11,0.4)":undefined;
+// Where each seat's cards fly in FROM, in px relative to where they land —
+// i.e. back at the dealer position in the middle of the felt.
+const SEAT_FLY: FlyFrom[] = [
+  { x:-292, y:-175, r: 22 },
+  { x:-257, y:  95, r: 18 },
+  { x: 257, y:  95, r:-18 },
+  { x: 282, y:-175, r:-22 },
+];
+// The hero's cards sit in the action bar below the felt, so they arrive from
+// well above rather than from a seat coordinate.
+const HERO_FLY: FlyFrom = { x:0, y:-280, r:12 };
 
-  return (
-    <div className={`absolute flex flex-col items-center gap-1 ${isWinner?"winner-seat":""}`} style={{...pos,zIndex:20}}>
-      {isCurrentTurn&&!folded&&(
-        <div className="animate-pulse" style={{background:"#f59e0b",color:"#000",fontWeight:900,fontSize:9,padding:"2px 8px",borderRadius:4,letterSpacing:1,boxShadow:"0 0 10px rgba(245,158,11,0.6)"}}>
-          THINKING…
-        </div>
-      )}
-      {isWinner&&<div style={{background:"#c9a227",color:"#000",fontWeight:900,fontSize:9,padding:"2px 7px",borderRadius:4,letterSpacing:1}}>WINNER!</div>}
-
-      <div style={{position:"relative",width:60,height:60}}>
-        <div style={{
-          position:"absolute",inset:0,borderRadius:"50%",
-          background:folded?"#1f2937":"linear-gradient(145deg,#374151,#4b5563)",
-          border:`3px solid ${borderCol}`,boxShadow:glow,opacity:folded?0.42:1,
-          display:"flex",alignItems:"center",justifyContent:"center",
-          fontSize:24,overflow:"hidden",transition:"border-color 0.3s,box-shadow 0.3s",
-        }}>
-          {player.avatar}
-          {folded&&(
-            <div style={{position:"absolute",inset:0,borderRadius:"50%",background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{fontSize:9,fontWeight:900,color:"#9ca3af",letterSpacing:1}}>FOLDED</span>
-            </div>
-          )}
-        </div>
-        {(player.isDealer||player.isSB||player.isBB)&&(
-          <div style={{position:"absolute",bottom:-4,right:-4,display:"flex",gap:2}}>
-            {player.isDealer&&<span style={{background:"#c9a227",color:"#000",fontWeight:900,fontSize:8,padding:"1px 4px",borderRadius:3}}>D</span>}
-            {player.isSB   &&<span style={{background:"#6b7280",color:"white",fontWeight:900,fontSize:8,padding:"1px 4px",borderRadius:3}}>SB</span>}
-            {player.isBB   &&<span style={{background:"#374151",color:"white",fontWeight:900,fontSize:8,padding:"1px 4px",borderRadius:3}}>BB</span>}
-          </div>
-        )}
-      </div>
-
-      <div style={{
-        background:isWinner?"rgba(201,162,39,0.18)":"rgba(0,0,0,0.82)",backdropFilter:"blur(8px)",
-        border:`1px solid ${isWinner?"rgba(201,162,39,0.5)":isCurrentTurn?"rgba(245,158,11,0.3)":"rgba(255,255,255,0.05)"}`,
-        borderRadius:8,padding:"4px 8px",
-        display:"flex",flexDirection:"column",alignItems:"center",
-        opacity:folded?0.45:1,transition:"all 0.3s",
-      }}>
-        <span style={{color:isWinner?"#f59e0b":"white",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>{player.name}</span>
-        <span style={{color:"#fbbf24",fontWeight:900,fontSize:11}}>${player.chips.toLocaleString()}</span>
-        {player.isAllIn&&!folded&&<span style={{color:"#ef4444",fontSize:10,fontWeight:900}}>ALL IN</span>}
-        {!player.isAllIn&&player.action!=="waiting"&&!folded&&(
-          <span style={{color:player.action==="fold"?"#6b7280":"#34d399",fontSize:10,fontWeight:700}}>
-            {actionLabel[player.action]}
-          </span>
-        )}
-      </div>
-
-      {!folded&&(
-        <div style={{display:"flex",gap:2,flexWrap:"wrap",justifyContent:"center",maxWidth:130}}>
-          {player.cards.map((c,i) => (
-            <div key={i} className={folded?"card-fold":""}>
-              <Card
-                card={showCards?c:null}
-                faceDown={!showCards}
-                size="sm"
-                isWinner={isWinner&&showCards}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-      {player.streetBet>0&&!folded&&(
-        <div className="chip-slide" style={{display:"flex",alignItems:"center",gap:5,marginTop:2,background:"rgba(0,0,0,0.55)",borderRadius:20,padding:"2px 8px 2px 3px",border:"1px solid rgba(245,158,11,0.3)"}}>
-          <div style={{position:"relative",width:20,height:14,flexShrink:0}}>
-            <div style={{position:"absolute",left:0,width:13,height:13,borderRadius:"50%",background:"radial-gradient(circle at 35% 30%,#fde68a,#f59e0b 60%,#b45309)",border:"1.5px solid #fde68a",boxShadow:"0 1px 2px rgba(0,0,0,0.6)"}}/>
-            <div style={{position:"absolute",left:6,width:13,height:13,borderRadius:"50%",background:"radial-gradient(circle at 35% 30%,#fde68a,#f59e0b 60%,#b45309)",border:"1.5px solid #fde68a",boxShadow:"0 1px 2px rgba(0,0,0,0.6)"}}/>
-          </div>
-          <span style={{color:"#fcd34d",fontSize:12,fontWeight:900}}>${player.streetBet.toLocaleString()}</span>
-        </div>
-      )}
-    </div>
-  );
-}
+// Milliseconds between consecutive cards leaving the dealer's hand. Omaha
+// pitches 20 cards a hand, so the stride is tighter than hold'em's.
+const DEAL_STRIDE = 52;
 
 // ─── Symmetric 4-card fan angles ──────────────────────────────────────────────
 const OMAHA_CARD_FANS = [
@@ -615,7 +424,6 @@ const OMAHA_CARD_FANS = [
 // ─── OmahaTableContent ────────────────────────────────────────────────────────
 
 function OmahaTableContent() {
-  const variant: GameVariant = "omaha";
   const router = useRouter();
 
   // Hero/opponent cards come from a Math.random() shuffle, so the server HTML
@@ -624,15 +432,28 @@ function OmahaTableContent() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // The felt is scaled to the measured height of the area left between the
+  // header and the action bar, so nothing can be clipped at any viewport.
+  const isMobile = useIsMobile();
+  const { ref: tableAreaRef, scale: tableScale } = useFitScale(isMobile ? OVAL_MOBILE : OVAL_DESKTOP);
+
+  // Mute is loaded after mount — localStorage does not exist during SSR — and
+  // written back on every toggle so the preference survives a reload. The key
+  // is shared with the hold'em table, so muting once mutes everywhere.
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
+  useEffect(() => { setMuted(loadMuted()); }, []);
 
   const sounds = useRef(makeSounds(mutedRef));
 
+  const toggleMute = useCallback(() => {
+    setMuted(m => { saveMuted(!m); return !m; });
+    sounds.current.unlock();
+  }, []);
+
   const [game, setGame] = useState<GameState>(() => buildInitialState(1));
   const [raiseAmt, setRaiseAmt] = useState(4);
-  const [dealTick, setDealTick] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
   const [bannerFading, setBannerFading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -661,8 +482,6 @@ function OmahaTableContent() {
     } catch {}
   }
 
-  // Suppress unused variable warning — dealTick is used to trigger deal sound effect
-  void dealTick;
 
   // Auth check + buy-in on mount
   useEffect(() => {
@@ -743,10 +562,13 @@ function OmahaTableContent() {
     setRaiseAmt(prev => Math.max(betRaiseMin, Math.min(prev, betRaiseMax)));
   }, [game.street, game.handNum, game.currentBet, betRaiseMin, betRaiseMax]);
 
-  // Deal sounds — 20 cards (4 per player × 5 players)
+  // One swoosh per card — 20 a hand (4 per player × 5 players) — on the same
+  // clock as the deal animation so each sound lands with its card. Cleared on
+  // unmount so a fast next hand cannot stack two hands of deal sounds.
   useEffect(() => {
-    setDealTick(t => t+1);
-    for (let i=0;i<20;i++) setTimeout(()=>sounds.current.deal(), i*130+50);
+    const ids = Array.from({length:20}, (_,i) =>
+      setTimeout(() => sounds.current.deal(), i*DEAL_STRIDE+40));
+    return () => ids.forEach(clearTimeout);
   }, [game.handNum]);
 
   // Track hero's chip count at the start of each hand (post-blinds)
@@ -758,6 +580,10 @@ function OmahaTableContent() {
   useEffect(() => {
     if (game.street!==prevStreet.current) {
       prevStreet.current = game.street;
+      // Board card hitting the felt — bigger, wider whoosh than a hole card.
+      if (game.street==="flop"||game.street==="turn"||game.street==="river") {
+        sounds.current.reveal();
+      }
       if (game.street==="showdown") {
         if (isHeroWinner) sounds.current.win();
         const heroEnd = game.players[0];
@@ -788,13 +614,20 @@ function OmahaTableContent() {
     setTimeLeft(30);
     timerRef.current = setInterval(()=>{
       setTimeLeft(prev=>{
-        if (prev===8) sounds.current.timer();
         if (prev<=1) { foldRef.current(); return 30; }
         return prev-1;
       });
     },1000);
     return ()=>{ if (timerRef.current) clearInterval(timerRef.current); };
   },[isHeroTurn, game.activeIdx, game.handNum]);
+
+  // Urgent countdown: a beep every second inside the last ten, climbing in
+  // pitch as the clock runs out. Driven off the rendered value rather than the
+  // interval so a re-entrant state updater can never double-fire it.
+  useEffect(()=>{
+    if (!isHeroTurn||timeLeft>10||timeLeft<=0) return;
+    sounds.current.timer(1-timeLeft/10);
+  },[timeLeft, isHeroTurn]);
 
   useEffect(()=>{
     const idx=game.activeIdx;
@@ -809,6 +642,7 @@ function OmahaTableContent() {
         const prevActor = prev.players[idx];
         const nextActor = next.players[idx];
         if (nextActor.action==="fold") sounds.current.fold();
+        else if (nextActor.action==="allin") sounds.current.allin();
         else if (nextActor.action!==prevActor.action) sounds.current.chip();
         return next;
       });
@@ -828,7 +662,6 @@ function OmahaTableContent() {
       setBannerFading(false);
     }, 4000);
     return () => { clearTimeout(fadeId); clearTimeout(dealId); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.street, game.handNum]);
 
   function heroCheck() {
@@ -844,14 +677,16 @@ function OmahaTableContent() {
     if (!isHeroTurn) return;
     const amt = Math.max(betRaiseMin,Math.min(raiseAmt,betRaiseMax));
     const a: "bet"|"raise" = game.currentBet===0?"bet":"raise";
-    sounds.current.chip();
+    // Sliding the bet all the way up is a shove, and should sound like one.
+    if (amt>=hero.chips+hero.streetBet) sounds.current.allin();
+    else sounds.current.chip();
     setGame(prev=>processAction(prev,0,a,amt));
   }
   function heroAllIn() {
     if (!isHeroTurn) return;
     const amt = hero.chips+hero.streetBet;
     const a: "bet"|"raise" = game.currentBet===0?"bet":"raise";
-    sounds.current.chip();
+    sounds.current.allin();
     setGame(prev=>processAction(prev,0,a,amt));
   }
   function newHand() {
@@ -870,17 +705,17 @@ function OmahaTableContent() {
   if (!mounted) return <div style={{background:"#060d08", height:"100vh"}} />;
 
   return (
-    <div className="h-screen text-white flex flex-col overflow-hidden" style={{background:"#060d08",userSelect:"none"}}>
+    <div className="h-[100dvh] text-white flex flex-col overflow-hidden" style={{background:"#060d08",userSelect:"none"}}>
 
       {/* ── Header ── */}
-      <header className="flex items-center justify-between shrink-0 px-3 md:px-4" style={{height:44,background:"#0a1410",borderBottom:"1px solid #1a2d1e"}}>
+      <header className="table-header flex items-center justify-between shrink-0 px-2 md:px-4 gap-2 h-[38px] md:h-11" style={{background:"#0a1410",borderBottom:"1px solid #1a2d1e"}}>
         <div className="flex items-center gap-2 md:gap-4 min-w-0">
-          <a href="/lobby" onClick={handleLeaveTable} className="text-sm transition-colors shrink-0 cursor-pointer" style={{color:"#4b5563"}}
+          <a href="/lobby" onClick={handleLeaveTable} className="text-[11px] md:text-sm transition-colors shrink-0 cursor-pointer whitespace-nowrap" style={{color:"#4b5563"}}
             onMouseEnter={e=>(e.currentTarget.style.color="#e5e7eb")}
             onMouseLeave={e=>(e.currentTarget.style.color="#4b5563")}>
             ← Lobby
           </a>
-          <span className="text-white font-bold text-sm truncate">Pot-Limit Omaha</span>
+          <span className="hdr-title text-white font-bold text-xs md:text-sm truncate">Pot-Limit Omaha</span>
           <span className="text-zinc-500 text-xs hidden sm:inline">$1/$2 · Table #4822</span>
           <span className="text-xs px-2 py-0.5 rounded font-mono hidden md:inline" style={{background:"rgba(201,162,39,0.12)",color:"#c9a227",border:"1px solid rgba(201,162,39,0.2)"}}>
             PLO
@@ -894,7 +729,9 @@ function OmahaTableContent() {
             <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:"#10b981"}} />
             {activePlayers.length}/5 active
           </span>
-          <span style={{color:"#c9a227"}} className="font-bold">Pot: ${game.pot.toLocaleString()}</span>
+          <span style={{color:"#c9a227"}} className="font-bold whitespace-nowrap text-[11px] md:text-xs">
+            Pot: <AnimatedAmount value={game.pot} />
+          </span>
           <span className="hidden sm:inline uppercase" style={{fontSize:11}}>{game.street}</span>
           {realBalance !== null && (
             <span className="hidden sm:block text-xs font-bold px-2 py-0.5 rounded" style={{color:"#34d399",background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.2)"}}>
@@ -907,10 +744,10 @@ function OmahaTableContent() {
             </span>
           )}
           <button
-            onClick={()=>setMuted(m=>!m)}
-            className="tip px-2 py-1 rounded transition-colors"
+            onClick={toggleMute}
+            className="tip px-1.5 md:px-2 py-0.5 md:py-1 rounded transition-colors shrink-0 text-xs md:text-sm"
             data-tip={muted?"Unmute sounds":"Mute sounds"}
-            style={{background:"#1a2d1e",color:muted?"#4b5563":"#34d399",fontSize:14,border:"1px solid #2d4a3a"}}
+            style={{background:"#1a2d1e",color:muted?"#4b5563":"#34d399",border:"1px solid #2d4a3a"}}
             title={muted?"Unmute":"Mute"}>
             {muted?"🔇":"🔊"}
           </button>
@@ -921,22 +758,20 @@ function OmahaTableContent() {
         <main className="flex-1 flex flex-col overflow-hidden">
 
           {/* ── Table scene ── */}
-          <div className="flex-1 relative overflow-hidden">
+          <div ref={tableAreaRef} className="table-area flex-1 relative overflow-hidden">
             <div className="absolute inset-0" style={{background:"radial-gradient(ellipse at 50% 60%,#1a130a 0%,#060d08 100%)"}} />
-            <div className="absolute inset-0 flex items-start justify-center pt-1 md:items-center md:pt-0">
-              <div className="table-scene relative" style={{width:800,height:440}}>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="table-scene relative" style={{width:SCENE_W,height:SCENE_H,transform:`scale(${tableScale})`}}>
 
-                {/* Felt — gold tint for Omaha */}
-                <div className="absolute" style={{left:70,top:55,width:660,height:330,borderRadius:"50%",
+                {/* Felt — gold tint for Omaha, green bloom off the rail */}
+                <div className="absolute table-glow" style={{left:70,top:55,width:660,height:330,borderRadius:"50%",
                   background:"linear-gradient(155deg,#2a3a1a 0%,#1a2a0f 50%,#2a3a1a 100%)",
                   boxShadow:["0 0 0 3px #c9a227","0 0 0 7px #1e1200","0 40px 130px rgba(0,0,0,0.95)","inset 0 2px 6px rgba(255,200,50,0.12)"].join(",")}}>
                   <div className="absolute" style={{inset:10,borderRadius:"50%",background:"linear-gradient(155deg,#1c2a00,#162200,#1c2a00)"}}>
-                    <div className="absolute" style={{inset:16,borderRadius:"50%",background:"radial-gradient(ellipse at 45% 38%,#2a5f2a 0%,#1a4a1a 52%,#0f3010 100%)",boxShadow:"inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)"}}>
+                    <div className="absolute felt-texture" style={{inset:16,borderRadius:"50%",background:"radial-gradient(ellipse at 45% 38%,#2a5f2a 0%,#1a4a1a 52%,#0f3010 100%)",boxShadow:"inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)"}}>
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                         <div className="flex items-center gap-3">
-                          <span className="font-black tracking-wide" style={{color:"#f59e0b",fontSize:24,textShadow:"0 2px 10px rgba(0,0,0,0.7)"}}>
-                            Pot: ${game.pot.toLocaleString()}
-                          </span>
+                          <PotDisplay pot={game.pot} />
                           <span style={{background:"rgba(201,162,39,0.15)",color:"#c9a227",fontSize:10,fontWeight:900,padding:"2px 7px",borderRadius:4,border:"1px solid rgba(201,162,39,0.3)"}}>PLO</span>
                         </div>
                         {game.sidePots.length>0&&(
@@ -968,15 +803,23 @@ function OmahaTableContent() {
                   </div>
                 </div>
 
-                {/* Opponent seats — all show 4 face-down cards, revealed at showdown */}
+                {/* Opponent seats — 4 face-down cards each, revealed at showdown.
+                    Cards fly out from the middle of the felt one at a time, in
+                    the order a dealer would pitch them. */}
                 {opponents.map((p,i) => (
                   <OpponentSeat
                     key={p.id} player={p} pos={SEAT_POS[i]}
                     showCards={isShowdown&&!p.folded}
                     isCurrentTurn={game.activeIdx===p.id&&!game.phaseDelay}
                     isWinner={game.winnerIds.includes(p.id)}
+                    fly={SEAT_FLY[i]}
+                    dealDelay={p.id*DEAL_STRIDE}
+                    dealStride={5*DEAL_STRIDE}
                   />
                 ))}
+
+                {/* Gold burst when the hero takes it down */}
+                {isShowdown&&isHeroWinner&&<WinBurst />}
 
                 {/* Hero seat */}
                 <div className="absolute flex flex-col items-center gap-1" style={{bottom:0,left:"50%",transform:"translateX(-50%)"}}>
@@ -1001,7 +844,7 @@ function OmahaTableContent() {
                     <span className="text-lg leading-none">{hero.avatar}</span>
                     <span style={{color:isHeroWinner?"#f59e0b":"#fbbf24",fontWeight:900,fontSize:12}}>You</span>
                     <span style={{color:"#374151",fontSize:11}}>·</span>
-                    <span style={{color:"#f3f4f6",fontWeight:700,fontSize:12}}>${hero.chips.toLocaleString()}</span>
+                    <AnimatedAmount value={hero.chips} style={{color:"#f3f4f6",fontWeight:700,fontSize:12}} />
                     {hero.streetBet>0&&<><span style={{color:"#374151",fontSize:11}}>·</span><span style={{color:"#fcd34d",fontSize:11}}>Bet ${hero.streetBet}</span></>}
                     {hero.folded&&<span style={{color:"#ef4444",fontSize:11,fontWeight:900}}>· FOLDED</span>}
                     {!hero.folded&&hero.isAllIn&&<span style={{color:"#ef4444",fontSize:11,fontWeight:900}}>· ALL IN</span>}
@@ -1030,13 +873,7 @@ function OmahaTableContent() {
                   )}
 
                   {hero.streetBet>0&&!hero.folded&&(
-                    <div className="chip-slide" style={{display:"flex",alignItems:"center",gap:5,background:"rgba(0,0,0,0.55)",borderRadius:20,padding:"2px 8px 2px 3px",border:"1px solid rgba(245,158,11,0.3)"}}>
-                      <div style={{position:"relative",width:20,height:14,flexShrink:0}}>
-                        <div style={{position:"absolute",left:0,width:13,height:13,borderRadius:"50%",background:"radial-gradient(circle at 35% 30%,#fde68a,#f59e0b 60%,#b45309)",border:"1.5px solid #fde68a",boxShadow:"0 1px 2px rgba(0,0,0,0.6)"}}/>
-                        <div style={{position:"absolute",left:6,width:13,height:13,borderRadius:"50%",background:"radial-gradient(circle at 35% 30%,#fde68a,#f59e0b 60%,#b45309)",border:"1.5px solid #fde68a",boxShadow:"0 1px 2px rgba(0,0,0,0.6)"}}/>
-                      </div>
-                      <span style={{color:"#fcd34d",fontSize:12,fontWeight:900}}>${hero.streetBet.toLocaleString()} to pot</span>
-                    </div>
+                    <BetPill amount={hero.streetBet} suffix="to pot" />
                   )}
                 </div>
 
@@ -1067,45 +904,52 @@ function OmahaTableContent() {
           <div className="shrink-0 px-3 md:px-6 py-3 md:py-4 action-bar-wrapper" style={{background:"rgba(6,13,8,0.97)",borderTop:"1px solid #1a2d1e"}}>
 
             {/* Hero cards + timer */}
-            <div className="flex items-end justify-center gap-4 md:gap-8 mb-3 md:mb-4">
-              <div className="flex flex-col items-end min-w-[90px] md:min-w-[110px]">
+            <div className="hero-hand-row flex items-end justify-center gap-4 md:gap-8 mb-3 md:mb-4">
+              <div className="hero-hand-meta hero-meta-left flex flex-col items-end min-w-[90px] md:min-w-[110px]">
                 <span style={{color:"#4b5563",fontSize:11}}>Your hand (4 cards)</span>
-                <span style={{color:"#34d399",fontWeight:700,fontSize:11}}>
+                <span className="truncate-1" style={{color:"#34d399",fontWeight:700,fontSize:11,maxWidth:140}}>
                   {hero.cards.map(c => `${c.value}${c.suit}`).join(" ")}
                 </span>
                 <span style={{color:"#c9a227",fontSize:10,marginTop:2,fontWeight:700}}>Use exactly 2</span>
               </div>
 
               {isHeroTurn&&(
-                <div style={{position:"relative",width:56,height:56,flexShrink:0}}>
-                  <svg width="56" height="56" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
+                <div className="hero-timer">
+                  <svg viewBox="0 0 56 56">
                     <circle cx="28" cy="28" r={timerRadius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4"/>
                     <circle cx="28" cy="28" r={timerRadius} fill="none" stroke={timerColor} strokeWidth="4"
                       strokeDasharray={`${timerDash} ${timerCirc}`}
                       strokeLinecap="round"
                       style={{transition:"stroke-dasharray 0.95s linear,stroke 0.3s"}}/>
                   </svg>
-                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{color:timerColor,fontWeight:900,fontSize:16}}>{timeLeft}</span>
-                  </div>
+                  <div className="timer-count" style={{color:timerColor}}>{timeLeft}</div>
                 </div>
               )}
 
-              {/* 4-card fan — symmetric [-9°, -3°, +3°, +9°] */}
-              <div className="flex gap-1.5 md:gap-2 items-end">
+              {/* 4-card fan — symmetric [-9°, -3°, +3°, +9°]. Each card is
+                  pitched in from the felt, then flipped face up in 3D. */}
+              <div className="hero-cards flex gap-1.5 md:gap-2 items-end">
                 {hero.cards.map((c,i) => (
                   <div key={`${game.handNum}-${i}`} style={{
                     transform: OMAHA_CARD_FANS[i],
                     transition:"transform 0.2s",
                   }}>
-                    <Card card={c} size="md" dealAnim dealDelay={i*120} isWinner={isHeroWinner&&isShowdown} />
+                    <Card
+                      card={c}
+                      size="md"
+                      fly={HERO_FLY}
+                      delay={i*5*DEAL_STRIDE}
+                      reveal
+                      isWinner={isHeroWinner&&isShowdown}
+                      className={hero.folded?"card-fold":""}
+                    />
                   </div>
                 ))}
               </div>
 
-              <div className="flex flex-col items-start min-w-[70px] md:min-w-[80px]">
+              <div className="hero-hand-meta hero-meta-right flex flex-col items-start min-w-[70px] md:min-w-[80px]">
                 <span style={{color:"#4b5563",fontSize:11}}>Street</span>
-                <span className="font-black" style={{fontSize:15,color:"#10b981",textTransform:"capitalize"}}>{game.street}</span>
+                <span className="hero-street font-black" style={{fontSize:15,color:"#10b981",textTransform:"capitalize"}}>{game.street}</span>
                 {game.currentBet>hero.streetBet&&!isShowdown&&(
                   <span style={{color:"#6b7280",fontSize:10,marginTop:2}}>To call: ${Math.min(game.currentBet-hero.streetBet,hero.chips)}</span>
                 )}
@@ -1116,7 +960,7 @@ function OmahaTableContent() {
             {!isShowdown&&!hero.folded&&!hero.isAllIn&&(
               <div className="flex justify-center mb-2">
                 <span style={{color:"#6b7280",fontSize:11,fontWeight:700}}>
-                  Pot: <span style={{color:"#f59e0b",fontWeight:900}}>${game.pot.toLocaleString()}</span>
+                  Pot: <AnimatedAmount value={game.pot} style={{color:"#f59e0b",fontWeight:900}} />
                   {game.currentBet>0&&<> · Current bet: <span style={{color:"#fbbf24",fontWeight:900}}>${game.currentBet.toLocaleString()}</span></>}
                 </span>
               </div>
@@ -1140,49 +984,32 @@ function OmahaTableContent() {
             ) : (
               <div className="flex items-stretch gap-2 md:gap-3 justify-center flex-wrap action-bar">
 
-                {/* Fold */}
-                <button onClick={heroFold} disabled={!isHeroTurn}
-                  className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                  data-tip="Discard your hand"
-                  style={{background:"#7f1d1d",color:"#fecaca",boxShadow:"0 4px 14px rgba(127,29,29,0.45)"}}
-                  onMouseEnter={e=>{if(isHeroTurn){e.currentTarget.style.background="#991b1b";e.currentTarget.style.transform="translateY(-1px)";}}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="#7f1d1d";e.currentTarget.style.transform="";}}>
+                <ActionButton tone="fold" onClick={heroFold} disabled={!isHeroTurn} tip="Discard your hand">
                   Fold
-                </button>
+                </ActionButton>
 
-                {/* Check or Call */}
                 {isBetContext ? (
-                  <button onClick={heroCheck} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                    data-tip="Pass action without betting"
-                    style={{background:"#1f2937",color:"#d1d5db",boxShadow:"0 4px 12px rgba(0,0,0,0.4)"}}
-                    onMouseEnter={e=>{if(isHeroTurn){e.currentTarget.style.background="#374151";e.currentTarget.style.transform="translateY(-1px)";}}}
-                    onMouseLeave={e=>{e.currentTarget.style.background="#1f2937";e.currentTarget.style.transform="";}}>
+                  <ActionButton tone="check" onClick={heroCheck} disabled={!isHeroTurn} tip="Pass action without betting">
                     Check
-                  </button>
+                  </ActionButton>
                 ) : (
-                  <button onClick={heroCall} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-6 md:px-8 py-2.5 md:py-3 transition-all disabled:opacity-40 action-btn"
-                    data-tip={`Match the current bet of $${game.currentBet}`}
-                    style={{background:"#14532d",color:"#bbf7d0",boxShadow:"0 4px 14px rgba(20,83,45,0.45)"}}
-                    onMouseEnter={e=>{if(isHeroTurn){e.currentTarget.style.background="#166534";e.currentTarget.style.transform="translateY(-1px)";}}}
-                    onMouseLeave={e=>{e.currentTarget.style.background="#14532d";e.currentTarget.style.transform="";}}>
+                  <ActionButton tone="call" onClick={heroCall} disabled={!isHeroTurn} tip={`Match the current bet of $${game.currentBet}`}>
                     Call ${callAmt.toLocaleString()}
-                  </button>
+                  </ActionButton>
                 )}
 
                 {/* Bet / Raise + slider */}
-                <div className="flex items-center gap-2 md:gap-3 rounded-xl px-3 md:px-4 py-2" style={{background:"#0f1a12",border:"1px solid #2d4a3a"}}>
-                  <div className="min-w-[60px] md:min-w-[72px]">
-                    <div style={{color:"#4b5563",fontSize:11}}>{isBetContext?"Bet":"Raise to"}</div>
-                    <div style={{color:"#f59e0b",fontWeight:900,fontSize:15}}>${Math.min(raiseAmt,betRaiseMax).toLocaleString()}</div>
+                <div className="bet-controls flex items-center gap-2 md:gap-3 rounded-xl px-3 md:px-4 py-2" style={{background:"#0f1a12",border:"1px solid #2d4a3a"}}>
+                  <div className="bet-readout min-w-[60px] md:min-w-[72px]">
+                    <div className="bet-readout-label" style={{color:"#4b5563",fontSize:11}}>{isBetContext?"Bet":"Raise to"}</div>
+                    <div className="bet-readout-value" style={{color:"#f59e0b",fontWeight:900,fontSize:15}}>${Math.min(raiseAmt,betRaiseMax).toLocaleString()}</div>
                   </div>
                   <input type="range"
                     min={betRaiseMin} max={betRaiseMax} step={1}
                     value={Math.max(betRaiseMin,Math.min(raiseAmt,betRaiseMax))}
                     onChange={e=>setRaiseAmt(Number(e.target.value))}
-                    className="w-20 md:w-32 cursor-pointer" style={{accentColor:"#f59e0b"}}/>
-                  <div className="flex flex-col gap-0.5">
+                    className="bet-slider w-20 md:w-32 cursor-pointer" style={{accentColor:"#f59e0b"}}/>
+                  <div className="bet-quick flex flex-col gap-0.5">
                     {([
                       ["½P", Math.max(betRaiseMin,Math.round(game.pot*0.5/2)*2)],
                       ["Pot",Math.max(betRaiseMin,game.pot)],
@@ -1197,22 +1024,19 @@ function OmahaTableContent() {
                       </button>
                     ))}
                   </div>
-                  <button onClick={heroBetRaise} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-sm px-4 md:px-5 py-2 md:py-2.5 whitespace-nowrap transition-all disabled:opacity-40 action-btn"
-                    data-tip={isBetContext?"Open the betting":"Raise the current bet"}
-                    style={{background:"#b45309",color:"#fef3c7",boxShadow:"0 4px 14px rgba(180,83,9,0.45)"}}
-                    onMouseEnter={e=>{if(isHeroTurn){e.currentTarget.style.background="#d97706";e.currentTarget.style.transform="translateY(-1px)";}}}
-                    onMouseLeave={e=>{e.currentTarget.style.background="#b45309";e.currentTarget.style.transform="";}}>
-                    {isBetContext?"Bet":"Raise to"} ${Math.max(betRaiseMin,Math.min(raiseAmt,betRaiseMax)).toLocaleString()}
-                  </button>
-                  <button onClick={heroAllIn} disabled={!isHeroTurn}
-                    className="tip font-black rounded-xl text-xs px-3 py-2 whitespace-nowrap transition-all disabled:opacity-40"
-                    data-tip="Go all-in with all your chips"
-                    style={{background:"#450a0a",color:"#fca5a5",border:"1px solid #7f1d1d"}}
-                    onMouseEnter={e=>{if(isHeroTurn){e.currentTarget.style.background="#7f1d1d";}}}
-                    onMouseLeave={e=>{e.currentTarget.style.background="#450a0a";}}>
+                  <ActionButton tone="raise" onClick={heroBetRaise} disabled={!isHeroTurn}
+                    tip={isBetContext?"Open the betting":"Raise the current bet"}>
+                    {/* The amount is already shown in the readout to the left,
+                        so drop it from the label on phones to save the row. */}
+                    <span className="md:hidden">{isBetContext?"Bet":"Raise"}</span>
+                    <span className="hidden md:inline">
+                      {isBetContext?"Bet":"Raise to"} ${Math.max(betRaiseMin,Math.min(raiseAmt,betRaiseMax)).toLocaleString()}
+                    </span>
+                  </ActionButton>
+                  <ActionButton tone="allin" onClick={heroAllIn} disabled={!isHeroTurn} compact
+                    tip="Go all-in with all your chips">
                     All-in
-                  </button>
+                  </ActionButton>
                 </div>
 
               </div>

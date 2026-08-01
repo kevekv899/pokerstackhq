@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ViewTransition } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -27,7 +28,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-zinc-950 text-white">
-        {children}
+        {/* Route navigations are React Transitions, so this crossfades every
+            page change. The animation itself lives in globals.css under
+            ::view-transition-old/new(root). */}
+        <ViewTransition>{children}</ViewTransition>
       </body>
     </html>
   );

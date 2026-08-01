@@ -81,7 +81,11 @@
       "Bash(curl -s -b /tmp/admin.jar --max-time 60 -X POST -H \"Content-Type: application/json\" -d '{\"userId\":2,\"banned\":true}' http://localhost:3000/api/admin/ban -o /dev/null -w \"ban: %{http_code}\\\\n\")",
       "Bash(curl -s --max-time 60 -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"sol567ana@gmail.com\",\"password\":\"deliberately-wrong\"}' http://localhost:3000/api/auth/login -w \" <- wrong pw \\(expect 401 Invalid\\)\\\\n\")",
       "Bash(curl -s -b /tmp/admin.jar --max-time 60 -X POST -H \"Content-Type: application/json\" -d '{\"userId\":2,\"banned\":false}' http://localhost:3000/api/admin/ban -o /dev/null -w \"unban: %{http_code}\\\\n\")",
-      "Bash(curl -s -b /tmp/admin.jar -c /tmp/admin.jar --max-time 60 -X DELETE http://localhost:3000/api/admin/login)"
+      "Bash(curl -s -b /tmp/admin.jar -c /tmp/admin.jar --max-time 60 -X DELETE http://localhost:3000/api/admin/login)",
+      "Bash(xargs wc -l)",
+      "Bash(node *)",
+      "Bash(grep *)",
+      "Bash(curl -s --max-time 60 http://localhost:3000/table)"
     ]
   }
 }
