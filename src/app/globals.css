@@ -260,6 +260,17 @@ body {
 
 /* ═══ TABLE SURFACE ════════════════════════════════════════════════════════ */
 
+/* The oval itself. Geometry lives here (not inline on the element) so phones
+   can make it taller without touching the 800×440 scene the seats are
+   positioned within — the fit maths is unaffected. */
+.felt-oval {
+  left: var(--felt-x, 70px);
+  top: var(--felt-y, 55px);
+  width: var(--felt-w, 660px);
+  height: var(--felt-h, 330px);
+  border-radius: 50%;
+}
+
 /* Woven-felt overlay: two fine diagonal grids plus a soft centre sheen. */
 .felt-texture::before {
   content: "";
@@ -442,6 +453,14 @@ body {
 }
 .tip:hover::after { opacity: 1; }
 
+/* Touch devices have no real hover: a tap latches :hover and the tooltip stays
+   parked over the cards until you tap elsewhere. Suppress it wherever hover is
+   not genuinely available, which covers every phone and tablet regardless of
+   width. */
+@media (hover: none), (pointer: coarse) {
+  .tip::after { content: none; display: none; }
+}
+
 /* ═══ TEXT SAFETY ══════════════════════════════════════════════════════════ */
 
 /* Flex children default to min-width:auto, which is the usual cause of
@@ -456,30 +475,25 @@ body {
 /* ═══ RESPONSIVE ═══════════════════════════════════════════════════════════ */
 
 /* ── Table fitting ──────────────────────────────────────────
-   The felt is authored at a fixed 800×440 and scaled down to fit whatever
-   space is left between the header and the action bar.
+   The felt is authored at a fixed 800×440 and scaled to fit the space left
+   between the header and the action bar, on BOTH axes.
 
-   The scene must be fitted on BOTH axes. Fitting width alone was the bug that
-   hid the hero seat: at desktop widths the scene rendered unscaled, but the
-   action bar is ~240px tall (it holds the 124px hero cards), so the 440px-tall
-   scene overflowed its centred container and `overflow:hidden` clipped the top
-   and bottom. The hero seat sits at `bottom:0` of the scene, so it was the
-   first thing to go.
-
-   Sizing is driven by container query units — the real measured box — rather
-   than a hardcoded `100vh - header - actionbar`. The action bar's height is not
-   a constant: it changes with the hero card size, and it shrinks at showdown
-   when the bet row is replaced by a status line. Reading the container keeps
-   the fit correct through all of that. */
-/* The scale itself is computed in JS (see _shared/useFitScale.ts) and applied
-   inline. It is NOT done here on purpose: the CSS form needs `min()` to compare
-   a bare number against a computed length, which is a type error, so browsers
-   drop the declaration and the table renders at full size. Measuring the box
-   also lets the fit follow the action bar, whose height is not constant. */
+   The scale is computed in JS (see _shared/useFitScale.ts) and applied inline,
+   deliberately not here: the CSS form needs `min()` to compare a bare number
+   against a computed length, which is a type error — browsers drop the whole
+   declaration and the table renders at full size. Measuring the box also lets
+   the fit follow the action bar, whose height is not constant (it changes with
+   hero card size, and shrinks at showdown when the bet row becomes a status
+   line). */
 .table-scene { transform-origin: center center; }
 
 /* ── Phones ─────────────────────────────────────────────── */
 @media (max-width: 767px) {
+  /* A taller oval inside the same 800×440 scene. The seats keep their
+     coordinates and the fit maths is untouched; the felt just occupies more of
+     the vertical space, so players read as sitting around a fuller table. */
+  .felt-oval { --felt-y: 32px; --felt-h: 380px; }
+
   /* Action buttons: 44px tall, 12px type. */
   .btn-action {
     --btn-fs: 12px;
@@ -566,12 +580,53 @@ body {
   .action-bar-wrapper { padding: 8px 10px !important; }
 }
 
-/* Very narrow phones (iPhone SE / mini). */
-@media (max-width: 380px) {
-  .btn-action { --btn-fs: 12px; --btn-pad: 0 10px; }
-  .hero-cards .pcard-lg { --cw: 52px; --ch: 74px; --c-corner: 13px; --c-suit: 27px; }
-  .hero-cards .pcard-md { --cw: 40px; --ch: 57px; --c-corner: 10px; --c-suit: 17px; }
-  .table-header .hdr-title { max-width: 96px; }
+/* ── Small phones ───────────────────────────────────────────
+   Everything below is width ≤ 480px: the layout stops trying to be a scaled
+   desktop and becomes a thumb-first one. */
+@media (max-width: 480px) {
+  /* Belt and braces alongside the (hover: none) rule above — a tooltip parked
+     over the cards is the single worst thing on a phone. */
+  .tip::after { content: none; display: none; }
+
+  /* Hero cards: bigger and legible, since they are the thing you actually
+     read. Overrides the ≤767px sizes above. */
+  .hero-cards .pcard-lg { --cw: 65px; --ch: 90px; --c-corner: 16px; --c-suit: 34px; --c-pad: 4px; --c-radius: 7px; }
+  .hero-cards .pcard-md { --cw: 52px; --ch: 73px; --c-corner: 13px; --c-suit: 23px; --c-pad: 3px; --c-radius: 6px; }
+
+  /* Claw back the height those cards cost, so the buttons do not get pushed
+     down: drop the labels, the redundant hand readout and the surrounding
+     padding. */
+  .hero-label { display: none !important; }
+  /* The left column only repeats the cards shown beside it. */
+  .hero-meta-left { display: none !important; }
+  .hero-hand-row { margin-bottom: 4px !important; gap: 4px 8px !important; }
+  .action-bar-wrapper { padding: 6px 8px !important; }
+  .hero-timer { --timer-size: 36px; }
+
+  /* Fold and Check/Call share one full-width row, 48px tall, larger type. */
+  .action-bar { flex-wrap: wrap; gap: 6px; }
+  .action-bar > .btn-action {
+    flex: 1 1 calc(50% - 3px);
+    height: 48px;
+    --btn-fs: 15px;
+    --btn-pad: 0 8px;
+  }
+
+  /* Bet controls: as short as they can be while staying tappable. */
+  .bet-controls {
+    gap: 4px !important;
+    padding: 4px 6px !important;
+  }
+  .bet-readout-label { font-size: 8px !important; }
+  .bet-readout-value { font-size: 11px !important; }
+  .bet-slider { height: 18px; min-width: 48px; }
+  .bet-quick button { padding: 1px 5px !important; font-size: 9px !important; }
+  /* Raise/All-in inside the bet row keep their own compact sizing — the 50%
+     rule above must not reach them. */
+  .bet-controls .btn-action { flex: 0 0 auto; height: 36px; --btn-fs: 12px; --btn-pad: 0 10px; }
+  .bet-controls .btn-action.btn-compact { height: 32px; --btn-fs: 11px; }
+
+  .table-header .hdr-title { max-width: 104px; }
 }
 
 /* Landscape phones have almost no vertical room. The felt needs no override —

@@ -800,7 +800,7 @@ function TableContent() {
               <div className="table-scene relative" style={{width:SCENE_W,height:SCENE_H,transform:`scale(${tableScale})`}}>
 
                 {/* Felt — gold rail, green bloom off the edge, woven overlay */}
-                <div className="absolute table-glow" style={{left:70,top:55,width:660,height:330,borderRadius:"50%",
+                <div className="absolute felt-oval table-glow" style={{
                   background:"linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)",
                   boxShadow:["0 0 0 3px #c9a227","0 0 0 7px #1e1200","0 40px 130px rgba(0,0,0,0.95)","inset 0 2px 6px rgba(255,200,50,0.08)"].join(",")}}>
                   <div className="absolute" style={{inset:10,borderRadius:"50%",background:"linear-gradient(155deg,#1c2a00,#162200,#1c2a00)"}}>
@@ -938,7 +938,7 @@ function TableContent() {
             {/* Hero cards + timer */}
             <div className="hero-hand-row flex items-end justify-center gap-4 md:gap-8 mb-3 md:mb-4">
               <div className="hero-hand-meta hero-meta-left flex flex-col items-end min-w-[90px] md:min-w-[110px]">
-                <span style={{color:"#4b5563",fontSize:11}}>Your hand</span>
+                <span className="hero-label" style={{color:"#4b5563",fontSize:11}}>Your hand</span>
                 <span className="truncate-1" style={{color:"#34d399",fontWeight:700,fontSize:12,maxWidth:130}}>
                   {hero.cards.map(c => `${c.value}${c.suit}`).join(" ")}
                 </span>
@@ -984,7 +984,7 @@ function TableContent() {
               </div>
 
               <div className="hero-hand-meta hero-meta-right flex flex-col items-start min-w-[70px] md:min-w-[80px]">
-                <span style={{color:"#4b5563",fontSize:11}}>Street</span>
+                <span className="hero-label" style={{color:"#4b5563",fontSize:11}}>Street</span>
                 <span className="hero-street font-black" style={{fontSize:15,color:"#10b981",textTransform:"capitalize"}}>{game.street}</span>
                 {game.currentBet>hero.streetBet&&!isShowdown&&(
                   <span style={{color:"#6b7280",fontSize:10,marginTop:2}}>To call: ${Math.min(game.currentBet-hero.streetBet,hero.chips)}</span>

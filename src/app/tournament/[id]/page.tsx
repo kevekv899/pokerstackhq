@@ -791,7 +791,7 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
               <div className="table-scene relative" style={{width:SCENE_W,height:SCENE_H,transform:`scale(${tableScale})`}}>
 
                 {/* Felt — gold rail, green bloom off the edge, woven overlay */}
-                <div className="absolute table-glow" style={{ left: 70, top: 55, width: 660, height: 330, borderRadius: "50%", background: "linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)", boxShadow: ["0 0 0 3px #c9a227", "0 0 0 7px #1e1200", "0 40px 130px rgba(0,0,0,0.95)", "inset 0 2px 6px rgba(255,200,50,0.08)"].join(",") }}>
+                <div className="absolute felt-oval table-glow" style={{ background: "linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)", boxShadow: ["0 0 0 3px #c9a227", "0 0 0 7px #1e1200", "0 40px 130px rgba(0,0,0,0.95)", "inset 0 2px 6px rgba(255,200,50,0.08)"].join(",") }}>
                   <div className="absolute" style={{ inset: 10, borderRadius: "50%", background: "linear-gradient(155deg,#1c2a00,#162200,#1c2a00)" }}>
                     <div className="absolute felt-texture" style={{ inset: 16, borderRadius: "50%", background: "radial-gradient(ellipse at 45% 38%,#235f35 0%,#1a4a2a 52%,#0f3019 100%)", boxShadow: "inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)" }}>
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
@@ -890,31 +890,29 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
 
           {/* Action bar */}
           <div className="shrink-0 px-3 md:px-6 py-3 md:py-4 action-bar-wrapper" style={{ background: "rgba(6,13,8,0.97)", borderTop: "1px solid #1a2d1e" }}>
-            <div className="flex items-end justify-center gap-4 md:gap-8 mb-3 md:mb-4">
-              <div className="flex flex-col items-end min-w-[80px]">
-                <span style={{ color: "#4b5563", fontSize: 11 }}>Your hand</span>
+            <div className="hero-hand-row flex items-end justify-center gap-4 md:gap-8 mb-3 md:mb-4">
+              <div className="hero-hand-meta hero-meta-left flex flex-col items-end min-w-[80px]">
+                <span className="hero-label" style={{ color: "#4b5563", fontSize: 11 }}>Your hand</span>
                 <span style={{ color: "#34d399", fontWeight: 700, fontSize: 12 }}>
                   {hero.cards.map(c => `${c.value}${c.suit}`).join(" ")}
                 </span>
               </div>
 
               {isHeroTurn && (
-                <div style={{ position: "relative", width: 56, height: 56, flexShrink: 0 }}>
-                  <svg width="56" height="56" style={{ position: "absolute", top: 0, left: 0, transform: "rotate(-90deg)" }}>
+                <div className="hero-timer">
+                  <svg viewBox="0 0 56 56">
                     <circle cx="28" cy="28" r={timerRadius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
                     <circle cx="28" cy="28" r={timerRadius} fill="none" stroke={timerColor} strokeWidth="4"
                       strokeDasharray={`${timerDash} ${timerCirc}`} strokeLinecap="round"
                       style={{ transition: "stroke-dasharray 0.95s linear,stroke 0.3s" }} />
                   </svg>
-                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ color: timerColor, fontWeight: 900, fontSize: 16 }}>{timeLeft}</span>
-                  </div>
+                  <div className="timer-count" style={{ color: timerColor }}>{timeLeft}</div>
                 </div>
               )}
 
               {/* Hero hole cards: pitched in from the felt, then flipped face
                   up in 3D once they land. */}
-              <div className="flex gap-1.5 md:gap-2 items-end">
+              <div className="hero-cards flex gap-1.5 md:gap-2 items-end">
                 {hero.cards.map((c, i) => (
                   <div key={`${game.handNum}-${i}`} style={{ transform: i === 0 ? "rotate(-5deg) translateY(4px)" : "rotate(5deg) translateY(4px)", transition: "transform 0.2s" }}>
                     <Card
@@ -930,9 +928,9 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                 ))}
               </div>
 
-              <div className="flex flex-col items-start min-w-[60px]">
-                <span style={{ color: "#4b5563", fontSize: 11 }}>Street</span>
-                <span className="font-black" style={{ fontSize: 14, color: "#10b981", textTransform: "capitalize" }}>{game.street}</span>
+              <div className="hero-hand-meta hero-meta-right flex flex-col items-start min-w-[60px]">
+                <span className="hero-label" style={{ color: "#4b5563", fontSize: 11 }}>Street</span>
+                <span className="hero-street font-black" style={{ fontSize: 14, color: "#10b981", textTransform: "capitalize" }}>{game.street}</span>
                 {game.currentBet > hero.streetBet && !isShowdown && (
                   <span style={{ color: "#6b7280", fontSize: 10, marginTop: 2 }}>To call: ${Math.min(game.currentBet - hero.streetBet, hero.chips)}</span>
                 )}
@@ -978,16 +976,16 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                   </ActionButton>
                 )}
 
-                <div className="flex items-center gap-2 md:gap-3 rounded-xl px-3 md:px-4 py-2" style={{ background: "#0f1a12", border: "1px solid #2d4a3a" }}>
-                  <div className="min-w-[56px] md:min-w-[68px]">
-                    <div style={{ color: "#4b5563", fontSize: 11 }}>{isBetCtx ? "Bet" : "Raise to"}</div>
-                    <div style={{ color: "#f59e0b", fontWeight: 900, fontSize: 14 }}>${Math.min(raiseAmt, betRaiseMax).toLocaleString()}</div>
+                <div className="bet-controls flex items-center gap-2 md:gap-3 rounded-xl px-3 md:px-4 py-2" style={{ background: "#0f1a12", border: "1px solid #2d4a3a" }}>
+                  <div className="bet-readout min-w-[56px] md:min-w-[68px]">
+                    <div className="bet-readout-label" style={{ color: "#4b5563", fontSize: 11 }}>{isBetCtx ? "Bet" : "Raise to"}</div>
+                    <div className="bet-readout-value" style={{ color: "#f59e0b", fontWeight: 900, fontSize: 14 }}>${Math.min(raiseAmt, betRaiseMax).toLocaleString()}</div>
                   </div>
                   <input type="range" min={betRaiseMin} max={betRaiseMax} step={1}
                     value={Math.max(betRaiseMin, Math.min(raiseAmt, betRaiseMax))}
                     onChange={e => setRaiseAmt(Number(e.target.value))}
-                    className="w-20 md:w-32 cursor-pointer" style={{ accentColor: "#f59e0b" }} />
-                  <div className="flex flex-col gap-0.5">
+                    className="bet-slider w-20 md:w-32 cursor-pointer" style={{ accentColor: "#f59e0b" }} />
+                  <div className="bet-quick flex flex-col gap-0.5">
                     {([["½P", Math.max(betRaiseMin, Math.round(game.pot * 0.5 / 2) * 2)], ["Pot", Math.max(betRaiseMin, game.pot)]] as [string, number][]).map(([lbl, v]) => (
                       <button key={lbl} onClick={() => setRaiseAmt(Math.min(betRaiseMax, Math.max(betRaiseMin, v)))}
                         className="text-xs px-1.5 py-0.5 rounded transition-colors"

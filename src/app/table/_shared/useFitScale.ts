@@ -74,7 +74,12 @@ export function useFitScale({ maxOvalW, maxOvalH, maxScale, padX = 16, padY = 12
  * On mobile the 340px width limit binds first (340/660 ≈ 0.515).
  */
 export const OVAL_DESKTOP = { maxOvalW: 700, maxOvalH: 500, maxScale: 0.8 };
-export const OVAL_MOBILE  = { maxOvalW: 340, maxOvalH: 280, maxScale: 1 };
+/**
+ * On phones the caps are deliberately slack and `padX` is nearly zero, so the
+ * width fit is what binds — the felt then spans the full screen width. The
+ * height term still guards against a short/landscape viewport.
+ */
+export const OVAL_MOBILE  = { maxOvalW: 460, maxOvalH: 460, maxScale: 1, padX: 2, padY: 6 };
 
 /** True while the viewport is narrower than the `md` breakpoint. */
 export function useIsMobile(breakpoint = 768): boolean {
