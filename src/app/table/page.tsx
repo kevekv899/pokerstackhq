@@ -420,10 +420,10 @@ function buildInitialState(handNum: number, prevPlayers?: PlayerState[], variant
 // along the top edge is what hid opponents on a phone — at the mobile oval's
 // 340px width the boxes overlapped and only the last-painted ones showed.
 const SEAT_POS: React.CSSProperties[] = [
-  { top:"5%",  left:"25%", transform:"translateX(-50%)" }, // top left
-  { top:"5%",  left:"75%", transform:"translateX(-50%)" }, // top right
-  { top:"45%", left:"5%",  transform:"translateY(-50%)" }, // left flank
-  { top:"45%", left:"90%", transform:"translateY(-50%)" }, // right flank
+  { top:"8%",  left:"20%", transform:"translateX(-50%)" }, // top left
+  { top:"8%",  left:"72%", transform:"translateX(-50%)" }, // top right
+  { top:"48%", left:"2%",  transform:"translateY(-50%)" }, // left flank
+  { top:"48%", left:"82%", transform:"translateY(-50%)" }, // right flank
 ];
 
 // Where each seat's cards fly in FROM, in px relative to where they land.
@@ -800,7 +800,10 @@ function TableContent() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <main className="flex-1 flex flex-col overflow-hidden">
+        {/* `w-full mx-auto` + `min-w-0` keep the felt centred on the viewport:
+            nothing in this row may make <main> wider than the screen, or the
+            centred scene inside it drifts off to one side. */}
+        <main className="flex-1 w-full mx-auto min-w-0 flex flex-col overflow-hidden">
 
           {/* ── Table scene ── */}
           <div ref={tableAreaRef} className="table-area flex-1 relative overflow-hidden">

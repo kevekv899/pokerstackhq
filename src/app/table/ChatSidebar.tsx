@@ -244,15 +244,18 @@ export default function ChatSidebar({
           </span>
         </div>
 
-        {/* Phones: out of the layout flow, so the felt keeps the full width. */}
+        {/* Phones: out of the layout flow, so the felt keeps the full width.
+            Parked at the top-left, just under the 44px header and clear of the
+            felt's top edge — the seats now reach 8% down the oval on the right
+            and 2% in from its left, so the top-right corner is no longer free. */}
         <button
           onClick={expand}
           className="md:hidden fixed flex items-center justify-center rounded-lg"
           title="Open chat"
           style={{
-            top: 52, right: 8, zIndex: 40, width: 34, height: 34,
+            top: 48, left: 6, zIndex: 40, width: 32, height: 32,
             background: "rgba(26,45,30,0.9)", border: "1px solid #2d4a3a",
-            fontSize: 18, backdropFilter: "blur(6px)",
+            fontSize: 17, backdropFilter: "blur(6px)",
           }}
         >
           💬
