@@ -9,7 +9,7 @@ import {
 } from "../../table/_shared/ui";
 import type { CardData, FlyFrom, Suit } from "../../table/_shared/ui";
 import { OpponentSeat } from "../../table/_shared/seat";
-import { OVAL_DESKTOP, OVAL_MOBILE, SCENE_H, SCENE_W, useFitScale, useIsMobile } from "../../table/_shared/useFitScale";
+import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "../../table/_shared/useFitScale";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -563,10 +563,8 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // The felt is scaled to the measured height of the area left between the
-  // header and the action bar, so nothing can be clipped at any viewport.
-  const isMobile = useIsMobile();
-  const { ref: tableAreaRef, scale: tableScale } = useFitScale(isMobile ? OVAL_MOBILE : OVAL_DESKTOP);
+  // One scale factor for every screen — see OVAL_FIT.
+  const { ref: tableAreaRef, scale: tableScale } = useFitScale(OVAL_FIT);
 
   // Mute is loaded after mount — localStorage does not exist during SSR — and
   // shares its key with the cash tables, so muting once mutes everywhere.

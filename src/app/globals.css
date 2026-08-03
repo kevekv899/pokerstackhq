@@ -602,33 +602,15 @@ body {
   .hero-hand-meta > span { font-size: 10px !important; }
   .hero-hand-meta .hero-street { font-size: 13px !important; }
 
-  /* Opponent seats shrink to their smallest readable form so four of them fit
-     around a 340px oval without touching: 30px avatars, 10px type. These are
-     authored sizes inside .table-scene, so what actually paints is this times
-     the fit scale (~0.48 on a 390px handset). */
-  .seat, .seat-compact {
-    --seat-avatar: 30px;
-    --seat-name-fs: 10px;
-    --seat-chip-fs: 10px;
-    --seat-tag-fs: 9px;
-  }
-  .seat-name { max-width: 52px; }
-
-  /* Opponent hole cards, tiny — they are face down almost always, so they only
-     have to read as cards. Deliberately scoped to .seat-cards: the community
-     cards are the shared board and stay legible. */
-  .seat-cards .pcard-sm {
-    --cw: 22px; --ch: 31px; --c-corner: 7px; --c-suit: 10px; --c-pad: 1.5px; --c-radius: 3.5px;
-  }
-  .seat-cards { gap: 2px; }
-
-  /* Three of the four seats sit along the top of the oval, so the pot and the
-     board drop into its lower half instead of being covered by them. */
-  .felt-center {
-    justify-content: flex-end;
-    padding-bottom: 7%;
-    gap: 6px !important;
-  }
+  /* NOTE: there are deliberately no seat rules here. Everything inside
+     `.table-scene` — seat coordinates, avatar sizes, seat type, hole cards, the
+     pot and board — is authored once at desktop size and reaches a phone purely
+     through the scene's single `transform: scale()`. Re-sizing seats per
+     breakpoint is what used to make the phone a *different* layout instead of a
+     smaller one, and it fought the fit maths: a 10px name inside a scene painted
+     at ~0.48 lands at ~5px anyway, so the override bought nothing and cost the
+     desktop composition. Chrome outside the scene (header, hero row, action bar)
+     is a real responsive layout and does still get rules below. */
 
   /* Header height and type scale come from Tailwind `md:` utilities on the
      markup itself — only the title's truncation width needs CSS. */

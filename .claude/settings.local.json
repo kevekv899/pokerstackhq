@@ -88,7 +88,8 @@
       "Bash(curl -s --max-time 60 http://localhost:3000/table)",
       "PowerShell(npx tsc --noEmit -p tsconfig.json)",
       "PowerShell(npx next build 2>&1 | Select-Object -Last 30)",
-      "PowerShell(npm run *)"
+      "PowerShell(npm run *)",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json; if \\($?\\) { \"typecheck OK\" }; git diff --stat)"
     ]
   }
 }

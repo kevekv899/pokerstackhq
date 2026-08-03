@@ -67,32 +67,13 @@ export function useFitScale({ maxOvalW, maxOvalH, maxScale, padX = 16, padY = 12
 }
 
 /**
- * Oval caps. The px limits are the design maxima; `maxScale` is what actually
- * binds on desktop — 700×500 is *larger* than the authored 660×330 oval, so
- * without it a roomy window would scale the table UP rather than down.
- * 0.8 paints the oval at 528×264, comfortably inside the 700×500 box.
- * On mobile the 340px width limit binds first (340/660 ≈ 0.515).
+ * One fit config for every viewport. There is no phone variant on purpose: the
+ * table is a single 800×440 scene that shrinks as a whole, so the only thing
+ * that changes between a desktop and an iPhone is the number this hook returns.
+ *
+ * `maxScale` is what binds on desktop — 700×500 is *larger* than the authored
+ * 660×330 oval, so without it a roomy window would scale the table UP rather
+ * than down; 0.8 paints the oval at 528×264. On a phone neither cap is reached
+ * and the container's own width binds instead: (390 − 8) / 800 ≈ 0.48.
  */
-export const OVAL_DESKTOP = { maxOvalW: 700, maxOvalH: 500, maxScale: 0.8 };
-/**
- * Phones. The oval is held to 320×200 CSS px — small enough that all four
- * opponents fit around it inside a table area that is only ~40% of the screen,
- * with room left over for the seats that hang off the rail.
- * 200/330 (0.606) is the looser of the two, so the width cap 320/660 (0.485)
- * is what binds on a roomy phone; on a 390px-wide handset the container fit
- * binds first and the oval lands nearer 315×158. Both stay under the caps.
- */
-export const OVAL_MOBILE  = { maxOvalW: 320, maxOvalH: 200, maxScale: 1, padX: 8, padY: 6 };
-
-/** True while the viewport is narrower than the `md` breakpoint. */
-export function useIsMobile(breakpoint = 768): boolean {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
-    const sync = () => setIsMobile(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, [breakpoint]);
-  return isMobile;
-}
+export const OVAL_FIT = { maxOvalW: 700, maxOvalH: 500, maxScale: 0.8, padX: 8, padY: 6 };

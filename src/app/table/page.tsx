@@ -9,7 +9,7 @@ import {
 } from "./_shared/ui";
 import type { CardData, FlyFrom, Suit } from "./_shared/ui";
 import { BetPill, OpponentSeat } from "./_shared/seat";
-import { OVAL_DESKTOP, OVAL_MOBILE, SCENE_H, SCENE_W, useFitScale, useIsMobile } from "./_shared/useFitScale";
+import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "./_shared/useFitScale";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -415,15 +415,17 @@ function buildInitialState(handNum: number, prevPlayers?: PlayerState[], variant
 // what keeps the four opponents spread around the table on a phone: the ring
 // tracks the oval, including the taller one phones switch to, so the seats
 // scale with it instead of bunching to one side.
-// Four corners of the ring, never three-across the top: two seats up top at the
-// quarter marks and two out on the flanks at mid-height. Stacking three seats
-// along the top edge is what hid opponents on a phone — at the mobile oval's
-// 340px width the boxes overlapped and only the last-painted ones showed.
+// One ring for every screen, mirrored about the oval's vertical axis: a pair up
+// top at 22%/78%, a pair centred on the left and right extremes of the ellipse.
+// Every seat is anchored through its own centre (`translate(-50%,…)`) rather
+// than by an edge, so the two halves are true mirror images — anchoring one side
+// by `left` and the other by `right` is what made the composition sit off-centre
+// even when the container was perfectly centred.
 const SEAT_POS: React.CSSProperties[] = [
-  { top:"8%",  left:"20%", transform:"translateX(-50%)" }, // top left
-  { top:"8%",  left:"72%", transform:"translateX(-50%)" }, // top right
-  { top:"48%", left:"2%",  transform:"translateY(-50%)" }, // left flank
-  { top:"48%", left:"82%", transform:"translateY(-50%)" }, // right flank
+  { top:"0%",   left:"20%",  transform:"translateX(-50%)"    }, // top left
+  { top:"0%",   left:"80%",  transform:"translateX(-50%)"    }, // top right
+  { top:"50%",  left:"0%",   transform:"translate(-50%,-50%)" }, // left extreme
+  { top:"50%",  left:"100%", transform:"translate(-50%,-50%)" }, // right extreme
 ];
 
 // Where each seat's cards fly in FROM, in px relative to where they land.
@@ -455,10 +457,10 @@ function TableContent() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // The felt is scaled to the measured height of the area left between the
-  // header and the action bar, so nothing can be clipped at any viewport.
-  const isMobile = useIsMobile();
-  const { ref: tableAreaRef, scale: tableScale } = useFitScale(isMobile ? OVAL_MOBILE : OVAL_DESKTOP);
+  // One scale factor for every screen. The scene is measured against the box
+  // left between the header and the action bar and shrinks as a single unit, so
+  // a phone gets the desktop table made smaller — not a rearranged one.
+  const { ref: tableAreaRef, scale: tableScale } = useFitScale(OVAL_FIT);
 
   // Mute is loaded after mount — localStorage does not exist during SSR — and
   // written back on every toggle so the preference survives a reload.

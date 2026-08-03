@@ -9,7 +9,7 @@ import {
 } from "../_shared/ui";
 import type { CardData, FlyFrom, Suit } from "../_shared/ui";
 import { BetPill, OpponentSeat } from "../_shared/seat";
-import { OVAL_DESKTOP, OVAL_MOBILE, SCENE_H, SCENE_W, useFitScale, useIsMobile } from "../_shared/useFitScale";
+import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "../_shared/useFitScale";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -437,10 +437,8 @@ function OmahaTableContent() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // The felt is scaled to the measured height of the area left between the
-  // header and the action bar, so nothing can be clipped at any viewport.
-  const isMobile = useIsMobile();
-  const { ref: tableAreaRef, scale: tableScale } = useFitScale(isMobile ? OVAL_MOBILE : OVAL_DESKTOP);
+  // One scale factor for every screen — see OVAL_FIT.
+  const { ref: tableAreaRef, scale: tableScale } = useFitScale(OVAL_FIT);
 
   // Mute is loaded after mount — localStorage does not exist during SSR — and
   // written back on every toggle so the preference survives a reload. The key
