@@ -64,29 +64,41 @@ const CONFIGS: Record<string, { numSeats: number; prizePool: number; name: strin
 const BOT_NAMES   = ["Bot_Shark","Bot_Lucky","Bot_King","Bot_Ace","Bot_Fox","Bot_Bear","Bot_Wolf","Bot_Eagle"];
 const BOT_AVATARS = ["🦈","🍀","👑","♠️","🦊","🐻","🐺","🦅"];
 
-// Seat positions per opponent count (3, 5, or 8)
+// Seat positions per opponent count (3, 4, 5 or 8).
+//
+// Seats are placed inside `.seat-ring`, which is the felt oval's own box — so
+// every value below is a percentage OF THE OVAL, never a scene pixel. That is
+// what keeps opponents spread around the table on a phone: the ring tracks the
+// oval, including the taller one phones switch to, so the seats scale with it
+// instead of bunching to one side.
 const SEAT_POS: Record<number, React.CSSProperties[]> = {
   3: [
-    { right: 100, top: 28 },
-    { left: "50%", top: 10, transform: "translateX(-50%)" },
-    { left: 100, top: 28 },
+    { top: "50%", right: "0%", transform: "translateY(-50%)" }, // right middle
+    { top: "0%",  left: "50%", transform: "translateX(-50%)" }, // top centre
+    { top: "50%", left: "0%",  transform: "translateY(-50%)" }, // left middle
+  ],
+  4: [
+    { top: "0%",  left: "50%",  transform: "translateX(-50%)" }, // top centre
+    { top: "50%", right: "0%",  transform: "translateY(-50%)" }, // right middle
+    { top: "5%",  left: "10%"  },                                // top left
+    { top: "5%",  right: "10%" },                                // top right
   ],
   5: [
-    { right: 55, bottom: 38 },
-    { right: 20, top: "48%", transform: "translateY(-50%)" },
-    { right: 88, top: 18 },
-    { left: 88, top: 18 },
-    { left: 55, bottom: 38 },
+    { bottom: "-5%", right: "2%" },                              // bottom right
+    { top: "50%",    right: "0%", transform: "translateY(-50%)" },
+    { top: "5%",     right: "10%" },
+    { top: "5%",     left: "10%" },
+    { bottom: "-5%", left: "2%" },                               // bottom left
   ],
   8: [
-    { right: 52, bottom: 38 },
-    { right: 16, top: "52%", transform: "translateY(-50%)" },
-    { right: 80, top: 18 },
-    { right: "50%", top: 10, transform: "translateX(108px)" },
-    { left: "50%",  top: 10, transform: "translateX(-108px)" },
-    { left: 80, top: 18 },
-    { left: 16, top: "52%", transform: "translateY(-50%)" },
-    { left: 52, bottom: 38 },
+    { bottom: "-5%", right: "2%" },
+    { top: "50%",    right: "0%", transform: "translateY(-50%)" },
+    { top: "5%",     right: "10%" },
+    { top: "0%",     left: "66%", transform: "translateX(-50%)" },
+    { top: "0%",     left: "34%", transform: "translateX(-50%)" },
+    { top: "5%",     left: "10%" },
+    { top: "50%",    left: "0%",  transform: "translateY(-50%)" },
+    { bottom: "-5%", left: "2%" },
   ],
 };
 
@@ -441,8 +453,13 @@ function processAIAction(state: TGame): TGame {
 // with the table size, so the origin is derived from which edge a seat sits on
 // rather than hard-coded per position.
 function flyFor(pos: React.CSSProperties): FlyFrom {
-  const onRight = pos.right !== undefined;
-  const onLeft  = pos.left  !== undefined && pos.left !== "50%";
+  // Seats are anchored either to a rail (`right`) or by a percentage across the
+  // oval (`left`), so the horizontal side comes from whichever is present — a
+  // `left` past the midpoint is a right-hand seat, and one at the midpoint is
+  // dead centre and gets a straight pitch.
+  const leftPct = typeof pos.left === "string" ? parseFloat(pos.left) : undefined;
+  const onRight = pos.right !== undefined || (leftPct !== undefined && leftPct > 55);
+  const onLeft  = !onRight && pos.left !== undefined && (leftPct === undefined || leftPct < 45);
   const onTop   = pos.top   !== undefined;
   return {
     x: onRight ? -250 : onLeft ? 250 : 0,
@@ -817,24 +834,28 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 </div>
 
-                {/* Opponent seats. Cards fly out from the middle of the felt,
-                    one seat at a time, in the order a dealer would pitch them.
-                    Busted players fade out in place. */}
-                {opponents.map((p, i) => {
-                  const pos = seatPositions[i] ?? { right: 60, top: 20 };
-                  return (
-                    <OpponentSeat
-                      key={p.id} player={p} pos={pos}
-                      showCards={isShowdown && !p.folded}
-                      isCurrentTurn={game.activeIdx === p.id && !game.phaseDelay}
-                      isWinner={game.winnerIds.includes(p.id)}
-                      compact
-                      fly={flyFor(pos)}
-                      dealDelay={p.id * DEAL_STRIDE}
-                      dealStride={game.numSeats * DEAL_STRIDE}
-                    />
-                  );
-                })}
+                {/* Opponent seats. The ring shares the felt's exact box, so the
+                    percentage seat coordinates stay pinned to the oval at every
+                    viewport. Cards fly out from the middle of the felt, one seat
+                    at a time, in the order a dealer would pitch them. Busted
+                    players fade out in place. */}
+                <div className="absolute felt-oval seat-ring">
+                  {opponents.map((p, i) => {
+                    const pos = seatPositions[i] ?? { top: "5%", right: "10%" };
+                    return (
+                      <OpponentSeat
+                        key={p.id} player={p} pos={pos}
+                        showCards={isShowdown && !p.folded}
+                        isCurrentTurn={game.activeIdx === p.id && !game.phaseDelay}
+                        isWinner={game.winnerIds.includes(p.id)}
+                        compact
+                        fly={flyFor(pos)}
+                        dealDelay={p.id * DEAL_STRIDE}
+                        dealStride={game.numSeats * DEAL_STRIDE}
+                      />
+                    );
+                  })}
+                </div>
 
                 {/* Gold burst when the hero takes down the pot */}
                 {isShowdown && isHeroWinner && <WinBurst />}

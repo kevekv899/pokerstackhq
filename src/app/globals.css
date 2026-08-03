@@ -271,6 +271,18 @@ body {
   border-radius: 50%;
 }
 
+/* The seats' positioning context. It carries `.felt-oval` as well, so it is
+   always exactly the oval's box — including the taller phone oval below — and
+   seats can therefore be placed in percentages of the *table* rather than of
+   the 800×440 scene. Percentages are what keep the ring intact at every
+   viewport: the seats move with the felt instead of drifting toward one side
+   when the oval's height changes. Purely a coordinate frame — no paint. */
+.seat-ring {
+  pointer-events: none;
+  z-index: 20;
+}
+.seat-ring .seat { pointer-events: auto; }
+
 /* Woven-felt overlay: two fine diagonal grids plus a soft centre sheen. */
 .felt-texture::before {
   content: "";

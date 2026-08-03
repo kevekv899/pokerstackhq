@@ -85,7 +85,10 @@
       "Bash(xargs wc -l)",
       "Bash(node *)",
       "Bash(grep *)",
-      "Bash(curl -s --max-time 60 http://localhost:3000/table)"
+      "Bash(curl -s --max-time 60 http://localhost:3000/table)",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json)",
+      "PowerShell(npx next build 2>&1 | Select-Object -Last 30)",
+      "PowerShell(npm run *)"
     ]
   }
 }

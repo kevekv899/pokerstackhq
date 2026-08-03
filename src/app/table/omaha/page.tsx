@@ -390,20 +390,25 @@ function buildInitialState(handNum: number, prevPlayers?: PlayerState[], prevLog
 
 // ─── Seat geometry ────────────────────────────────────────────────────────────
 
+// Seats are placed inside `.seat-ring`, which is the felt oval's own box — so
+// every value below is a percentage OF THE OVAL, never a scene pixel. That is
+// what keeps the four opponents spread around the table on a phone: the ring
+// tracks the oval, including the taller one phones switch to, so the seats
+// scale with it instead of bunching to one side.
 const SEAT_POS: React.CSSProperties[] = [
-  { right:60, bottom:18 },
-  { right:95, top:10 },
-  { left:95,  top:10 },
-  { left:70,  bottom:18 },
+  { top:"0%",  left:"50%",  transform:"translateX(-50%)" }, // top centre
+  { top:"50%", right:"0%",  transform:"translateY(-50%)" }, // right middle
+  { top:"5%",  left:"10%"  },                               // top left
+  { top:"5%",  right:"10%" },                               // top right
 ];
 
 // Where each seat's cards fly in FROM, in px relative to where they land —
 // i.e. back at the dealer position in the middle of the felt.
 const SEAT_FLY: FlyFrom[] = [
-  { x:-292, y:-175, r: 22 },
-  { x:-257, y:  95, r: 18 },
-  { x: 257, y:  95, r:-18 },
-  { x: 282, y:-175, r:-22 },
+  { x:   0, y: 51, r:  0 },
+  { x:-282, y:-39, r:-18 },
+  { x: 216, y: 35, r: 18 },
+  { x:-216, y: 35, r:-18 },
 ];
 // The hero's cards sit in the action bar below the felt, so they arrive from
 // well above rather than from a seat coordinate.
@@ -804,19 +809,23 @@ function OmahaTableContent() {
                 </div>
 
                 {/* Opponent seats — 4 face-down cards each, revealed at showdown.
-                    Cards fly out from the middle of the felt one at a time, in
-                    the order a dealer would pitch them. */}
-                {opponents.map((p,i) => (
-                  <OpponentSeat
-                    key={p.id} player={p} pos={SEAT_POS[i]}
-                    showCards={isShowdown&&!p.folded}
-                    isCurrentTurn={game.activeIdx===p.id&&!game.phaseDelay}
-                    isWinner={game.winnerIds.includes(p.id)}
-                    fly={SEAT_FLY[i]}
-                    dealDelay={p.id*DEAL_STRIDE}
-                    dealStride={5*DEAL_STRIDE}
-                  />
-                ))}
+                    The ring shares the felt's exact box, so the percentage seat
+                    coordinates stay pinned to the oval at every viewport. Cards
+                    fly out from the middle of the felt one at a time, in the
+                    order a dealer would pitch them. */}
+                <div className="absolute felt-oval seat-ring">
+                  {opponents.map((p,i) => (
+                    <OpponentSeat
+                      key={p.id} player={p} pos={SEAT_POS[i]}
+                      showCards={isShowdown&&!p.folded}
+                      isCurrentTurn={game.activeIdx===p.id&&!game.phaseDelay}
+                      isWinner={game.winnerIds.includes(p.id)}
+                      fly={SEAT_FLY[i]}
+                      dealDelay={p.id*DEAL_STRIDE}
+                      dealStride={5*DEAL_STRIDE}
+                    />
+                  ))}
+                </div>
 
                 {/* Gold burst when the hero takes it down */}
                 {isShowdown&&isHeroWinner&&<WinBurst />}
