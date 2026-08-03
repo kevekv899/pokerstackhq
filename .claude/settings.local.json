@@ -89,7 +89,14 @@
       "PowerShell(npx tsc --noEmit -p tsconfig.json)",
       "PowerShell(npx next build 2>&1 | Select-Object -Last 30)",
       "PowerShell(npm run *)",
-      "PowerShell(npx tsc --noEmit -p tsconfig.json; if \\($?\\) { \"typecheck OK\" }; git diff --stat)"
+      "PowerShell(npx tsc --noEmit -p tsconfig.json; if \\($?\\) { \"typecheck OK\" }; git diff --stat)",
+      "Bash(npx vitest *)",
+      "Bash(cp src/lib/poker/engine.ts /tmp/engine.bak)",
+      "Bash(cp src/lib/poker/pot.ts /tmp/pot.bak)",
+      "Bash(perl -0pi -e 's/  if \\\\\\(!reopens\\\\\\) return;/  if \\(false\\) return;/' src/lib/poker/engine.ts)",
+      "Bash(perl -0pi -e 's/positionOf\\\\\\(a\\\\\\) - positionOf\\\\\\(b\\\\\\)/positionOf\\(b\\) - positionOf\\(a\\)/' src/lib/poker/pot.ts)",
+      "Bash(cp /tmp/engine.bak src/lib/poker/engine.ts)",
+      "Bash(cp /tmp/pot.bak src/lib/poker/pot.ts)"
     ]
   }
 }
