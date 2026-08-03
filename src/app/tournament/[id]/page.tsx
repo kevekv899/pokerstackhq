@@ -483,14 +483,14 @@ function TournamentHeader({
   const mm = String(Math.floor(levelSecondsLeft / 60)).padStart(2, "0");
   const ss = String(levelSecondsLeft % 60).padStart(2, "0");
   return (
-    <header className="shrink-0 flex items-center justify-between px-3 md:px-4 flex-wrap gap-y-1" style={{ minHeight: 44, background: "#0a1410", borderBottom: "1px solid #1a2d1e" }}>
+    <header className="table-header shrink-0 flex items-center justify-between px-3 md:px-4 flex-wrap gap-y-1" style={{ minHeight: 44, background: "#0a1410", borderBottom: "1px solid #1a2d1e" }}>
       <div className="flex items-center gap-3 min-w-0">
         <Link href="/tournaments" className="text-sm transition-colors shrink-0" style={{ color: "#4b5563" }}
           onMouseEnter={e => (e.currentTarget.style.color = "#e5e7eb")}
           onMouseLeave={e => (e.currentTarget.style.color = "#4b5563")}>
           ← Tournaments
         </Link>
-        <div className="flex items-center gap-2 flex-wrap text-xs">
+        <div className="hdr-meta flex items-center gap-2 flex-wrap text-xs">
           <span className="font-bold" style={{ color: "#f59e0b" }}>Prize ${prizePool.toLocaleString()}</span>
           <span style={{ color: "#374151" }}>|</span>
           <span style={{ color: "#d1d5db" }}>Players <span className="font-bold">{playersRemaining}/{totalPlayers}</span></span>
@@ -811,7 +811,7 @@ function TournamentContent({ params }: { params: Promise<{ id: string }> }) {
                 <div className="absolute felt-oval table-glow" style={{ background: "linear-gradient(155deg,#1a4a2a 0%,#0f3019 50%,#1a4a2a 100%)", boxShadow: ["0 0 0 3px #c9a227", "0 0 0 7px #1e1200", "0 40px 130px rgba(0,0,0,0.95)", "inset 0 2px 6px rgba(255,200,50,0.08)"].join(",") }}>
                   <div className="absolute" style={{ inset: 10, borderRadius: "50%", background: "linear-gradient(155deg,#1c2a00,#162200,#1c2a00)" }}>
                     <div className="absolute felt-texture" style={{ inset: 16, borderRadius: "50%", background: "radial-gradient(ellipse at 45% 38%,#235f35 0%,#1a4a2a 52%,#0f3019 100%)", boxShadow: "inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)" }}>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                      <div className="felt-center absolute inset-0 flex flex-col items-center justify-center gap-3">
                         <PotDisplay pot={game.pot} />
                         {game.sidePots.length > 0 && (
                           <div className="flex gap-2">

@@ -752,7 +752,7 @@ function TableContent() {
     <div className="h-[100dvh] text-white flex flex-col overflow-hidden" style={{background:"#060d08",userSelect:"none"}}>
 
       {/* ── Header ── */}
-      <header className="table-header flex items-center justify-between shrink-0 px-2 md:px-4 gap-2 h-[38px] md:h-11" style={{background:"#0a1410",borderBottom:"1px solid #1a2d1e"}}>
+      <header className="table-header flex items-center justify-between shrink-0 px-2 md:px-4 gap-2 h-11" style={{background:"#0a1410",borderBottom:"1px solid #1a2d1e"}}>
         <div className="flex items-center gap-2 md:gap-4 min-w-0">
           <a href="/lobby" onClick={handleLeaveTable} className="text-[11px] md:text-sm transition-colors shrink-0 cursor-pointer whitespace-nowrap" style={{color:"#4b5563"}}
             onMouseEnter={e=>(e.currentTarget.style.color="#e5e7eb")}
@@ -810,7 +810,7 @@ function TableContent() {
                   boxShadow:["0 0 0 3px #c9a227","0 0 0 7px #1e1200","0 40px 130px rgba(0,0,0,0.95)","inset 0 2px 6px rgba(255,200,50,0.08)"].join(",")}}>
                   <div className="absolute" style={{inset:10,borderRadius:"50%",background:"linear-gradient(155deg,#1c2a00,#162200,#1c2a00)"}}>
                     <div className="absolute felt-texture" style={{inset:16,borderRadius:"50%",background:"radial-gradient(ellipse at 45% 38%,#235f35 0%,#1a4a2a 52%,#0f3019 100%)",boxShadow:"inset 0 0 90px rgba(0,0,0,0.6),inset 0 0 30px rgba(0,0,0,0.35)"}}>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                      <div className="felt-center absolute inset-0 flex flex-col items-center justify-center gap-4">
                         <PotDisplay pot={game.pot} />
                         {game.sidePots.length>0&&(
                           <div className="flex gap-2 flex-wrap justify-center">

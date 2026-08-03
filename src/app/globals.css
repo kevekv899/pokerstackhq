@@ -501,10 +501,37 @@ body {
 
 /* ── Phones ─────────────────────────────────────────────── */
 @media (max-width: 767px) {
-  /* A taller oval inside the same 800×440 scene. The seats keep their
-     coordinates and the fit maths is untouched; the felt just occupies more of
-     the vertical space, so players read as sitting around a fuller table. */
-  .felt-oval { --felt-y: 32px; --felt-h: 380px; }
+  /* The oval keeps its authored 660×330 proportions here — the phone size cap
+     (340×200) is applied by useFitScale's OVAL_MOBILE instead. Stretching the
+     felt taller in CSS used to fight that maths: the fit still divided by the
+     authored 330, so the painted oval came out taller than the cap allowed and
+     crowded the seats off the table. One place owns the size now. */
+
+  /* The table gets 40% of the screen and no more, so the hero row and the
+     action bar below it can never be pushed off the bottom. `flex` (not
+     `height`) keeps it shrinkable on a short/landscape viewport, and the scene
+     rescales to whatever height it ends up with — useFitScale measures the box
+     through a ResizeObserver. */
+  .table-area {
+    flex: 0 1 40dvh;
+    min-height: 0;
+  }
+
+  /* One fixed-height header row. `nowrap` stops the tournament's blind/level
+     readout from wrapping onto a second line and stealing table height; the
+     meta row scrolls sideways instead of being truncated. */
+  .table-header {
+    height: 44px;
+    min-height: 44px;
+    flex-wrap: nowrap;
+  }
+  .hdr-meta {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .hdr-meta::-webkit-scrollbar { display: none; }
 
   /* Action buttons: 44px tall, 12px type. */
   .btn-action {
@@ -575,14 +602,33 @@ body {
   .hero-hand-meta > span { font-size: 10px !important; }
   .hero-hand-meta .hero-street { font-size: 13px !important; }
 
-  /* Opponent avatars 36px, names and stacks stepped down to match. */
+  /* Opponent seats shrink to their smallest readable form so four of them fit
+     around a 340px oval without touching: 30px avatars, 10px type. These are
+     authored sizes inside .table-scene, so what actually paints is this times
+     the fit scale (~0.48 on a 390px handset). */
   .seat, .seat-compact {
-    --seat-avatar: 36px;
-    --seat-name-fs: 8.5px;
-    --seat-chip-fs: 9px;
-    --seat-tag-fs: 7.5px;
+    --seat-avatar: 30px;
+    --seat-name-fs: 10px;
+    --seat-chip-fs: 10px;
+    --seat-tag-fs: 9px;
   }
-  .seat-name { max-width: 56px; }
+  .seat-name { max-width: 52px; }
+
+  /* Opponent hole cards, tiny — they are face down almost always, so they only
+     have to read as cards. Deliberately scoped to .seat-cards: the community
+     cards are the shared board and stay legible. */
+  .seat-cards .pcard-sm {
+    --cw: 22px; --ch: 31px; --c-corner: 7px; --c-suit: 10px; --c-pad: 1.5px; --c-radius: 3.5px;
+  }
+  .seat-cards { gap: 2px; }
+
+  /* Three of the four seats sit along the top of the oval, so the pot and the
+     board drop into its lower half instead of being covered by them. */
+  .felt-center {
+    justify-content: flex-end;
+    padding-bottom: 7%;
+    gap: 6px !important;
+  }
 
   /* Header height and type scale come from Tailwind `md:` utilities on the
      markup itself — only the title's truncation width needs CSS. */
