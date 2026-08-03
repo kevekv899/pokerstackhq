@@ -497,7 +497,22 @@ body {
    the fit follow the action bar, whose height is not constant (it changes with
    hero card size, and shrinks at showdown when the bet row becomes a status
    line). */
-.table-scene { transform-origin: center center; }
+.table-scene {
+  transform-origin: center center;
+  /* `flex-shrink: 0` is load-bearing, not tidiness. The scene is a flex item
+     with an 800px basis and only absolutely-positioned children, so its
+     content-based minimum width is 0 — on a phone the flex line is ~390px and
+     the box would otherwise collapse to that. `transform: scale()` does not
+     change layout size, but `transform-origin: center center` resolves against
+     the *layout* box, so a collapsed scene pivots on x=195 rather than the
+     scene's real centre at x=400 and the table paints ~98px right of centre,
+     clipped at the right edge. Held at 800px it overflows the line evenly,
+     `justify-content: center` keeps it centred, and the painted 382px result
+     sits inside the viewport. */
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: auto;
+}
 
 /* ── Phones ─────────────────────────────────────────────── */
 @media (max-width: 767px) {

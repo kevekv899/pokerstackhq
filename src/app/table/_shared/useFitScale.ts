@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+
+/** Layout effect on the client, plain effect during SSR (where it is a no-op). */
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /** Authored size of the table scene. Seat coordinates are in this space. */
 export const SCENE_W = 800;
@@ -35,8 +38,15 @@ interface FitOptions {
 export function useFitScale({ maxOvalW, maxOvalH, maxScale, padX = 16, padY = 12 }: FitOptions) {
   const ref = useRef<HTMLDivElement | null>(null);
   const cap = Math.min(maxScale, maxOvalW / FELT_W, maxOvalH / FELT_H);
-  // Start at the cap so the first paint is never larger than the target.
-  const [scale, setScale] = useState(cap);
+  // Seed from the viewport, not from `cap`. The cap is a desktop number (0.8);
+  // using it as the pre-measurement value paints one frame at 0.8 on a phone —
+  // an 800px scene drawn at 640px inside a 390px screen — before the observer
+  // corrects it. The window width is the one bound available during render.
+  const [scale, setScale] = useState(() =>
+    typeof window === "undefined"
+      ? cap
+      : Math.max(0.1, Math.min(cap, (window.innerWidth - padX) / SCENE_W))
+  );
 
   const measure = useCallback((el: HTMLElement) => {
     const { width, height } = el.getBoundingClientRect();
@@ -54,7 +64,10 @@ export function useFitScale({ maxOvalW, maxOvalH, maxScale, padX = 16, padY = 12
     });
   }, [cap, padX, padY]);
 
-  useEffect(() => {
+  // Layout effect, so the first real measurement lands before the browser
+  // paints rather than one frame after it — an over-large first frame is
+  // visible as the table jumping in from beyond the screen edge.
+  useIsomorphicLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     measure(el);
