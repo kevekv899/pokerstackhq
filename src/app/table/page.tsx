@@ -415,11 +415,15 @@ function buildInitialState(handNum: number, prevPlayers?: PlayerState[], variant
 // what keeps the four opponents spread around the table on a phone: the ring
 // tracks the oval, including the taller one phones switch to, so the seats
 // scale with it instead of bunching to one side.
+// Four corners of the ring, never three-across the top: two seats up top at the
+// quarter marks and two out on the flanks at mid-height. Stacking three seats
+// along the top edge is what hid opponents on a phone — at the mobile oval's
+// 340px width the boxes overlapped and only the last-painted ones showed.
 const SEAT_POS: React.CSSProperties[] = [
-  { top:"0%",  left:"50%",  transform:"translateX(-50%)" }, // top centre
-  { top:"50%", right:"0%",  transform:"translateY(-50%)" }, // right middle
-  { top:"5%",  left:"10%"  },                               // top left
-  { top:"5%",  right:"10%" },                               // top right
+  { top:"5%",  left:"25%", transform:"translateX(-50%)" }, // top left
+  { top:"5%",  left:"75%", transform:"translateX(-50%)" }, // top right
+  { top:"45%", left:"5%",  transform:"translateY(-50%)" }, // left flank
+  { top:"45%", left:"90%", transform:"translateY(-50%)" }, // right flank
 ];
 
 // Where each seat's cards fly in FROM, in px relative to where they land.
