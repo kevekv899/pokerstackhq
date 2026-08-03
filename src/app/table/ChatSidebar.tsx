@@ -200,49 +200,74 @@ export default function ChatSidebar({
     send(draft);
   }
 
-  // ── Collapsed strip ──
+  const unreadBadge = unread > 0 && (
+    <span
+      className="absolute"
+      style={{
+        top: -6, right: -6, minWidth: 17, height: 17, padding: "0 4px",
+        background: "#dc2626", color: "#fff", fontSize: 10, fontWeight: 900,
+        borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 0 0 2px #0a1410",
+      }}
+    >
+      {unread > 99 ? "99+" : unread}
+    </span>
+  );
+
+  // ── Collapsed ──
+  // Below `md` the rail is gone entirely and only a floating button remains:
+  // anything in this flex row — even a 46px strip — narrows <main>, and since
+  // the felt is centred inside <main> rather than inside the viewport, that
+  // shows up on a phone as the whole table shunted to the left.
   if (collapsed) {
     return (
-      <div
-        className="shrink-0 flex flex-col items-center pt-3"
-        style={{ width: 46, background: "#0a1410", borderLeft: "1px solid #1a2d1e" }}
-      >
+      <>
+        <div
+          className="hidden md:flex shrink-0 flex-col items-center pt-3"
+          style={{ width: 46, background: "#0a1410", borderLeft: "1px solid #1a2d1e" }}
+        >
+          <button
+            onClick={expand}
+            className="relative flex items-center justify-center rounded-lg transition-colors"
+            title="Open chat"
+            style={{ width: 34, height: 34, background: "#1a2d1e", border: "1px solid #2d4a3a", fontSize: 18 }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#223a2a")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#1a2d1e")}
+          >
+            💬
+            {unreadBadge}
+          </button>
+          <span
+            style={{ writingMode: "vertical-rl", color: "#4b5563", fontSize: 10, fontWeight: 900, letterSpacing: 1, marginTop: 10, textTransform: "uppercase" }}
+          >
+            Chat
+          </span>
+        </div>
+
+        {/* Phones: out of the layout flow, so the felt keeps the full width. */}
         <button
           onClick={expand}
-          className="relative flex items-center justify-center rounded-lg transition-colors"
+          className="md:hidden fixed flex items-center justify-center rounded-lg"
           title="Open chat"
-          style={{ width: 34, height: 34, background: "#1a2d1e", border: "1px solid #2d4a3a", fontSize: 18 }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#223a2a")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#1a2d1e")}
+          style={{
+            top: 52, right: 8, zIndex: 40, width: 34, height: 34,
+            background: "rgba(26,45,30,0.9)", border: "1px solid #2d4a3a",
+            fontSize: 18, backdropFilter: "blur(6px)",
+          }}
         >
           💬
-          {unread > 0 && (
-            <span
-              className="absolute"
-              style={{
-                top: -6, right: -6, minWidth: 17, height: 17, padding: "0 4px",
-                background: "#dc2626", color: "#fff", fontSize: 10, fontWeight: 900,
-                borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 0 0 2px #0a1410",
-              }}
-            >
-              {unread > 99 ? "99+" : unread}
-            </span>
-          )}
+          {unreadBadge}
         </button>
-        <span
-          style={{ writingMode: "vertical-rl", color: "#4b5563", fontSize: 10, fontWeight: 900, letterSpacing: 1, marginTop: 10, textTransform: "uppercase" }}
-        >
-          Chat
-        </span>
-      </div>
+      </>
     );
   }
 
   // ── Expanded sidebar ──
+  // In the flex row from `md` up; a fixed overlay panel on phones, for the same
+  // reason as the collapsed rail — it must not take width away from the felt.
   return (
     <div
-      className="shrink-0 flex flex-col"
+      className="shrink-0 flex flex-col fixed inset-y-0 right-0 z-50 md:static md:z-auto"
       style={{ width: 250, background: "#0a1410", borderLeft: "1px solid #1a2d1e" }}
     >
       {/* Header */}
