@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Compiled realtime-server output — lint the TypeScript sources, not the
+    // CommonJS emit.
+    "server/dist/**",
   ]),
 ]);
 

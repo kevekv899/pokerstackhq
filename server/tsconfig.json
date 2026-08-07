@@ -14,5 +14,5 @@
     "declaration": false
   },
   "include": ["index.ts", "**/*.ts", "../src/lib/poker/**/*.ts"],
-  "exclude": ["dist", "../src/lib/poker/__tests__/**"]
+  "exclude": ["dist", "__tests__/**", "../src/lib/poker/__tests__/**"]
 }

@@ -99,7 +99,16 @@
       "Bash(cp /tmp/pot.bak src/lib/poker/pot.ts)",
       "Bash(git status *)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(echo \"BUILD_EXIT=$?\")"
+      "Bash(echo \"BUILD_EXIT=$?\")",
+      "Bash(npm test *)",
+      "Bash(netstat -ano)",
+      "Bash(ps -W)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(PROBE_PORT=8130 node ./probe.tmp.mjs)",
+      "Bash(python -)",
+      "Bash(echo \"ESLINT_SERVER_EXIT=$?\")",
+      "Bash(echo \"SRC_LINT_EXIT=$?\")",
+      "Bash(git check-ignore *)"
     ]
   }
 }
