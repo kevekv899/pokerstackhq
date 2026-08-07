@@ -96,7 +96,10 @@
       "Bash(perl -0pi -e 's/  if \\\\\\(!reopens\\\\\\) return;/  if \\(false\\) return;/' src/lib/poker/engine.ts)",
       "Bash(perl -0pi -e 's/positionOf\\\\\\(a\\\\\\) - positionOf\\\\\\(b\\\\\\)/positionOf\\(b\\) - positionOf\\(a\\)/' src/lib/poker/pot.ts)",
       "Bash(cp /tmp/engine.bak src/lib/poker/engine.ts)",
-      "Bash(cp /tmp/pot.bak src/lib/poker/pot.ts)"
+      "Bash(cp /tmp/pot.bak src/lib/poker/pot.ts)",
+      "Bash(git status *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"BUILD_EXIT=$?\")"
     ]
   }
 }
