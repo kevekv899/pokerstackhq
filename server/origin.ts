@@ -2,8 +2,8 @@
  * Origin filtering for the WebSocket upgrade.
  *
  * SECURITY: origin is a convenience filter, NOT the security boundary. Any
- * non-browser client can set whatever Origin header it likes. The Supabase
- * token check in `index.ts` is the real gate, and it runs unconditionally —
+ * non-browser client can set whatever Origin header it likes. The session
+ * token check in `auth.ts` is the real gate, and it runs unconditionally —
  * never skip or relax it based on what this predicate returned.
  */
 

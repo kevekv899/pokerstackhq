@@ -53,6 +53,8 @@ export interface RoomOptions {
   /** SECRET. Deterministic shuffles for replay/tests. Never sent to a client. */
   seed?: string | null;
   showdownRevealMs?: number;
+  /** How long each decision gets. Shortened in tests. */
+  actionTimeoutMs?: number;
 }
 
 export class Room {
@@ -68,7 +70,7 @@ export class Room {
   /** Asked to leave while a hand was live; unseated once it finishes. */
   private readonly leaving = new Set<string>();
 
-  private readonly clock = new ActionClock();
+  private readonly clock: ActionClock;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly showdownRevealMs: number;
   /** True between reaching SHOWDOWN and finishing the hand — actions are refused. */
@@ -77,6 +79,7 @@ export class Room {
   constructor(options: RoomOptions) {
     this.tableId = options.tableId;
     this.showdownRevealMs = options.showdownRevealMs ?? SHOWDOWN_REVEAL_MS;
+    this.clock = new ActionClock(options.actionTimeoutMs);
     this.state = createTable({
       tableId: options.tableId,
       seatCount: options.seatCount ?? 6,
@@ -158,9 +161,11 @@ export class Room {
   /** A socket dropped. Keeps the seat so a reconnect can reclaim it. */
   disconnect(userId: string): void {
     this.sockets.delete(userId);
-    // Nobody is watching this decision any more; don't leave a timer armed for
-    // a socket that is gone.
-    if (this.actingPlayerId() === userId) this.clock.clear();
+    // The action clock is deliberately left running. Disarming it for the
+    // player who just dropped would stall the hand indefinitely: nothing
+    // re-arms it, so everyone else waits on a socket that may never return.
+    // Leaving it armed times them out and auto-folds them like anyone else,
+    // and a reconnect within the window still gets the remaining time.
   }
 
   /** Cancels every pending timer. For shutdown and tests. */
@@ -270,19 +275,24 @@ export class Room {
 
   /** Broadcasts, then drives whatever the new street requires. */
   private afterChange(): void {
-    this.broadcast();
-
     if (this.state.street === 'SHOWDOWN') {
+      this.broadcast();
       this.beginShowdown();
       return;
     }
     if (this.state.street === 'PAYOUT') {
       // Uncontested win: the engine already went straight to PAYOUT and
       // credited the chips, so there is nothing to settle.
+      this.broadcast();
       this.finishHand();
       return;
     }
+    // Arm before broadcasting: the clock's deadline rides along on every state
+    // message, so re-arming afterwards would ship a decision with a stale (or
+    // null) deadline and leave the client without a countdown until the next
+    // broadcast.
     this.armClock();
+    this.broadcast();
   }
 
   private beginShowdown(): void {
@@ -295,6 +305,7 @@ export class Room {
         type: 'showdown',
         state: toPublicState(this.state, userId),
         result,
+        ...this.clockEnvelope(),
       });
     }
 
@@ -319,6 +330,7 @@ export class Room {
         type: 'handEnd',
         state: toPublicState(this.state, userId),
         result,
+        ...this.clockEnvelope(),
       });
     }
 
@@ -384,7 +396,28 @@ export class Room {
   }
 
   private sendTo(userId: string): void {
-    this.push(userId, { type: 'state', state: toPublicState(this.state, userId) });
+    this.push(userId, {
+      type: 'state',
+      state: toPublicState(this.state, userId),
+      ...this.clockEnvelope(),
+    });
+  }
+
+  /**
+   * The action clock, as the server sees it. `serverTime` is included so a
+   * client with a skewed clock can convert `actionDeadline` into its own frame
+   * instead of trusting that the two machines agree on the epoch.
+   */
+  private clockEnvelope(): {
+    actionDeadline: number | null;
+    actionTimeoutMs: number;
+    serverTime: number;
+  } {
+    return {
+      actionDeadline: this.clock.deadline,
+      actionTimeoutMs: this.clock.timeoutMs,
+      serverTime: Date.now(),
+    };
   }
 
   private error(userId: string, code: string, message: string): void {

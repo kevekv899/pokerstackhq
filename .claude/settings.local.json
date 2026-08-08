@@ -108,7 +108,13 @@
       "Bash(python -)",
       "Bash(echo \"ESLINT_SERVER_EXIT=$?\")",
       "Bash(echo \"SRC_LINT_EXIT=$?\")",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(echo \"=== tsc exit: $? ===\")",
+      "Bash(cp server/room.ts /tmp/room.ts.bak)",
+      "Bash(cp server/room.ts __TRACKED_VAR__/room.ts.bak)",
+      "Bash(python -c ' *)",
+      "Bash(echo \"app tsc exit=$?\")",
+      "Bash(echo \"server build exit=$?\")"
     ]
   }
 }

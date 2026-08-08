@@ -1,8 +1,8 @@
 import { config as loadEnv } from 'dotenv';
 import { createServer, type IncomingMessage } from 'node:http';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { encodeSecret, verifySessionToken } from './auth.js';
 import { isOriginAllowed } from './origin.js';
 import { Room } from './room.js';
 
@@ -11,6 +11,25 @@ import { Room } from './room.js';
 loadEnv({ path: ['.env.local', '.env'], quiet: true });
 
 const PORT = Number(process.env.PORT ?? 8080);
+
+/**
+ * The secret the Next.js app signs `ps_token` with. Required: without it every
+ * connection would be rejected one by one, which looks like a client bug rather
+ * than a missing deployment variable, so refuse to boot instead.
+ *
+ * Note `src/lib/auth.ts` falls back to a dev string when this is unset. Set it
+ * explicitly in both places — a server booted here and an app running on the
+ * fallback would sign and verify with different keys.
+ */
+const JWT_SECRET_VALUE = process.env.JWT_SECRET;
+if (!JWT_SECRET_VALUE) {
+  console.error(
+    '[server] JWT_SECRET is not set. It must match the secret the Next.js app ' +
+      'signs ps_token with, or no client can authenticate.',
+  );
+  process.exit(1);
+}
+const JWT_SECRET = encodeSecret(JWT_SECRET_VALUE);
 
 /** Closed on a failed or missing auth handshake. */
 const CLOSE_AUTH_FAILED = 4001;
@@ -31,25 +50,6 @@ const server = createServer((req, res) => {
   res.writeHead(404, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: 'not_found' }));
 });
-
-// ---------------------------------------------------------------------------
-// Supabase — service role, server only
-// ---------------------------------------------------------------------------
-
-let supabaseAdmin: SupabaseClient | null = null;
-
-function getSupabaseAdmin(): SupabaseClient {
-  if (supabaseAdmin) return supabaseAdmin;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const secret = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !secret) {
-    throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY must be set');
-  }
-  supabaseAdmin = createClient(url, secret, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return supabaseAdmin;
-}
 
 // ---------------------------------------------------------------------------
 // Rooms
@@ -177,23 +177,10 @@ wss.on('connection', (socket: WebSocket) => {
 
 /**
  * The real security boundary. Unconditional — it does not consult the origin
- * and there is no path around it.
+ * and there is no path around it. See `auth.ts`.
  */
 async function verifyToken(token: unknown): Promise<{ id: string; name: string } | null> {
-  if (typeof token !== 'string' || token.length === 0) return null;
-  try {
-    const { data, error } = await getSupabaseAdmin().auth.getUser(token);
-    if (error || !data.user) return null;
-    const meta = data.user.user_metadata as Record<string, unknown> | null;
-    const name =
-      (typeof meta?.username === 'string' && meta.username) ||
-      data.user.email ||
-      data.user.id;
-    return { id: data.user.id, name };
-  } catch (err) {
-    console.error('[auth] token verification failed:', err);
-    return null;
-  }
+  return verifySessionToken(token, JWT_SECRET);
 }
 
 function wrap(socket: WebSocket) {
@@ -226,3 +213,7 @@ process.on('uncaughtException', (err) => {
 server.listen(PORT, () => {
   console.log(`[server] listening on :${PORT}`);
 });
+
+// Exported so an integration test can drive a real handshake against a real
+// socket (bind with PORT=0 for an ephemeral port) and close it again.
+export { server, wss };
