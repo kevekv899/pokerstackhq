@@ -1,4 +1,6 @@
 import { config as loadEnv } from 'dotenv';
+import { execFileSync } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 
@@ -37,13 +39,71 @@ const CLOSE_AUTH_FAILED = 4001;
 const AUTH_TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
+// Build stamp
+// ---------------------------------------------------------------------------
+
+/**
+ * Identifies the build actually running, so one `curl /health` answers "which
+ * commit is live?" without guessing from behaviour.
+ *
+ * Resolved once at boot: the values cannot change while the process runs, and
+ * a health check must not shell out to git on every request.
+ */
+const BUILD = { commit: resolveCommit(), builtAt: resolveBuiltAt() };
+const STARTED_AT = new Date().toISOString();
+
+/** Railway injects the deployed SHA; locally we ask git. */
+function resolveCommit(): string {
+  const fromEnv =
+    process.env.RAILWAY_GIT_COMMIT_SHA ??
+    process.env.GIT_COMMIT_SHA ??
+    process.env.SOURCE_VERSION; // Heroku-style, harmless if unset
+  if (fromEnv) return fromEnv.slice(0, 7);
+
+  try {
+    // execFile, not exec: no shell, nothing interpolated.
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+    }).trim();
+    return sha || 'unknown';
+  } catch {
+    // No git, or not a checkout — a deployed image usually has neither.
+    return 'unknown';
+  }
+}
+
+/**
+ * When this build was produced, taken from the compiled entry file's mtime —
+ * the compiler wrote it, so it is the build time without needing the build to
+ * stamp anything. Null if it cannot be read (e.g. running from source).
+ */
+function resolveBuiltAt(): string | null {
+  try {
+    if (typeof __filename !== 'string') return null;
+    return statSync(__filename).mtime.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
 const server = createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
+    // Never cached: a stale stamp would defeat the whole point of asking.
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        commit: BUILD.commit,
+        builtAt: BUILD.builtAt,
+        // Distinguishes a fresh deploy from a process that merely stayed up.
+        startedAt: STARTED_AT,
+      }),
+    );
     return;
   }
 
@@ -211,7 +271,9 @@ process.on('uncaughtException', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[server] listening on :${PORT}`);
+  console.log(
+    `[server] listening on :${PORT} — commit ${BUILD.commit}, built ${BUILD.builtAt ?? 'unknown'}`,
+  );
 });
 
 // Exported so an integration test can drive a real handshake against a real
