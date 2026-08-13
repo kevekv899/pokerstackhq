@@ -18,11 +18,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ChatSidebar from "./ChatSidebar";
 import { loadMuted, makeSounds, saveMuted } from "./_shared/sounds";
 import {
-  ActionButton, AnimatedAmount, Card, CommunitySlot, PotDisplay, WinBurst,
+  ActionButton, AnimatedAmount, Card, Chip, CommunitySlot, PotDisplay, WinBurst,
 } from "./_shared/ui";
 import type { CardData, FlyFrom, SeatAction, Suit } from "./_shared/ui";
 import { BetPill, OpponentSeat } from "./_shared/seat";
 import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "./_shared/useFitScale";
+import {
+  announcementSummary, buildAnnouncement, winningsByPlayer,
+  type WinAnnouncement, type WinnerLine,
+} from "./_shared/winAnnouncement";
 import { useGameSocket, type ConnectionStatus } from "@/lib/useGameSocket";
 import type {
   Card as EngineCard,
@@ -136,33 +140,200 @@ function historyLines(state: PublicTableState, nameOf: (id: string | null) => st
   return lines.slice(-20);
 }
 
-/** Total chips each player is taking from the pots this hand. */
-function winningsByPlayer(result: HandResult): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const pot of result.pots) {
-    for (const winner of pot.winners) {
-      out.set(winner.playerId, (out.get(winner.playerId) ?? 0) + winner.amount);
-    }
+// ─── Win announcement ─────────────────────────────────────────────────────────
+
+/** Chips leave the pot, land, and only then does the text arrive. */
+const CHIP_FLIGHT_MS = 420;
+const TEXT_IN_MS = 250;
+const TEXT_HOLD_MS = 2000;
+const TEXT_OUT_MS = 350;
+/** How long the amount takes to count up once the text is in. */
+const COUNT_UP_MS = 600;
+
+type AnnouncePhase = "idle" | "chips" | "text" | "out";
+
+/** The pot sits at the middle of the ring; chips start their flight here. */
+const POT_CENTER = { left: "50%", top: "50%" };
+/**
+ * The hero seat lives below the felt, outside the ring, so its chips aim just
+ * past the ring's bottom edge. Percentages of the ring rather than scene px:
+ * the ring tracks the oval, so this stays aimed at the hero if the oval's
+ * geometry ever changes per breakpoint.
+ */
+const HERO_CHIP_TARGET = { left: "50%", top: "104%" };
+
+const CHIPS_PER_WINNER = 4;
+
+/**
+ * Where a winner's chips should land, in the seat ring's percentage frame.
+ *
+ * Derived from the seat index rather than by looking the player up in the
+ * current seats, because they may have got up before the animation finishes —
+ * the same rotation the seats are drawn with, applied to a snapshot.
+ */
+function chipTargetFor(winner: WinnerLine, announcement: WinAnnouncement): { left: string; top: string } {
+  if (winner.isViewer) return HERO_CHIP_TARGET;
+
+  const { viewerSeatIndex, seatCount } = announcement;
+  if (winner.seatIndex === null || viewerSeatIndex === null || seatCount <= 0) {
+    return POT_CENTER;
   }
-  return out;
+  // Seats are drawn clockwise from the hero's left, so slot 0 is one seat past
+  // the viewer — exactly the offset the ring is built with.
+  const slot = (winner.seatIndex - viewerSeatIndex + seatCount) % seatCount - 1;
+  const pos = slot >= 0 ? SEAT_POS[slot] : undefined;
+  return pos ? { left: String(pos.left), top: String(pos.top) } : POT_CENTER;
 }
 
-function resultBanner(
-  result: HandResult,
-  nameOf: (id: string | null) => string,
-  viewerId: string,
-): string {
-  const parts: string[] = [];
-  for (const [playerId, amount] of winningsByPlayer(result)) {
-    const hand = result.showdown?.find((entry) => entry.playerId === playerId)?.hand.name;
-    const who = playerId === viewerId ? "You win" : `${nameOf(playerId)} wins`;
-    parts.push(
-      hand
-        ? `${who} $${amount.toLocaleString()} with ${hand}`
-        : `${who} $${amount.toLocaleString()}`,
-    );
-  }
-  return parts.join(" · ");
+/**
+ * Chips sliding from the pot to each winner's seat.
+ *
+ * `left`/`top` are transitioned rather than keyframed because every winner has
+ * a different destination, and keyframes cannot take per-element values. They
+ * are percentages of the seat ring — the same frame the seats themselves are
+ * positioned in — so a chip always lands on its seat at any viewport.
+ */
+function ChipFlight({ announcement, released }: { announcement: WinAnnouncement; released: boolean }) {
+  return (
+    <div className="absolute felt-oval seat-ring" style={{ zIndex: 30 }} aria-hidden>
+      {announcement.winners.flatMap((winner) => {
+        const target = chipTargetFor(winner, announcement);
+        return Array.from({ length: CHIPS_PER_WINNER }, (_, i) => (
+          <div
+            key={`${winner.playerId}-${i}`}
+            style={{
+              position: "absolute",
+              left: released ? target.left : POT_CENTER.left,
+              top: released ? target.top : POT_CENTER.top,
+              // Fanned slightly so four chips read as a stack in motion.
+              transform: `translate(calc(-50% + ${(i - 1.5) * 7}px), calc(-50% + ${(i - 1.5) * 3}px))`,
+              opacity: released ? 0 : 1,
+              transition:
+                `left ${CHIP_FLIGHT_MS}ms cubic-bezier(.35,.85,.35,1) ${i * 45}ms,` +
+                `top ${CHIP_FLIGHT_MS}ms cubic-bezier(.35,.85,.35,1) ${i * 45}ms,` +
+                // Fades out just as it arrives, handing off to the seat stack.
+                `opacity 160ms linear ${CHIP_FLIGHT_MS - 60 + i * 45}ms`,
+            }}
+          >
+            <Chip size={15} tone="gold" />
+          </div>
+        ));
+      })}
+    </div>
+  );
+}
+
+/**
+ * Counts from zero to `value`. Deliberately not `AnimatedAmount`, which holds
+ * its first value so nothing counts up on mount — here the count-up from zero
+ * *is* the effect, and it must restart every time the overlay appears.
+ */
+function CountUp({ value, style }: { value: number; style?: React.CSSProperties }) {
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    let raf = 0;
+    let start: number | null = null;
+    const tick = (ts: number) => {
+      if (start === null) start = ts;
+      const t = Math.min(1, (ts - start) / COUNT_UP_MS);
+      // easeOutCubic — fast out of the gate, settles onto the final number.
+      setShown(t === 1 ? value : Math.round(value * (1 - (1 - t) ** 3)));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+
+  return <span style={style}>${shown.toLocaleString()}</span>;
+}
+
+/**
+ * The announcement itself. Big and gold when the viewer won, quiet and
+ * informative when somebody else did.
+ *
+ * Purely presentational: it renders the snapshot it is handed and owns no
+ * game state.
+ */
+function WinAnnouncementCard({
+  announcement, leaving,
+}: { announcement: WinAnnouncement; leaving: boolean }) {
+  const { winners, viewerWon } = announcement;
+  const split = winners.length > 1;
+
+  return (
+    <div
+      className={leaving ? "win-announce-out" : "win-announce"}
+      style={{
+        display: "flex", flexDirection: "column", alignItems: "center", gap: split ? 8 : 4,
+        // Bounded so a long name or a three-way split can never reach the rail.
+        maxWidth: 520, padding: "0 16px", textAlign: "center",
+      }}
+    >
+      {viewerWon && !split && (
+        <div style={{
+          color: "#fde68a", fontWeight: 900, fontSize: 40, lineHeight: 1, letterSpacing: 2,
+          textShadow: "0 2px 10px rgba(0,0,0,.85), 0 0 34px rgba(201,162,39,.75)",
+        }}>
+          YOU WIN
+        </div>
+      )}
+
+      {split && (
+        <div style={{
+          color: "#fbbf24", fontWeight: 900, fontSize: 15, letterSpacing: 3,
+          textShadow: "0 2px 8px rgba(0,0,0,.8)",
+        }}>
+          SPLIT POT
+        </div>
+      )}
+
+      {winners.map((winner) => {
+        // A single non-viewer winner is the subdued case: informative, not a
+        // celebration of somebody else's pot.
+        const loud = winner.isViewer;
+        return (
+          <div key={winner.playerId} style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
+          }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+              {(split || !winner.isViewer) && (
+                <span style={{
+                  color: loud ? "#fde68a" : "#e5e7eb",
+                  fontWeight: 900, fontSize: loud ? 20 : 15,
+                  textShadow: "0 2px 8px rgba(0,0,0,.8)",
+                  maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {winner.name} {winner.isViewer ? "win" : "wins"}
+                </span>
+              )}
+              <CountUp
+                value={winner.amount}
+                style={{
+                  color: loud ? "#f59e0b" : "#fcd34d",
+                  fontWeight: 900,
+                  fontSize: loud ? (split ? 26 : 34) : 20,
+                  letterSpacing: -0.5,
+                  textShadow: loud
+                    ? "0 2px 10px rgba(0,0,0,.85), 0 0 26px rgba(245,158,11,.6)"
+                    : "0 2px 8px rgba(0,0,0,.8)",
+                }}
+              />
+            </div>
+            {winner.hand && (
+              <span style={{
+                color: loud ? "#d1d5db" : "#9ca3af",
+                fontSize: loud ? 13 : 11.5, fontWeight: 700, letterSpacing: 0.3,
+                textShadow: "0 1px 6px rgba(0,0,0,.9)",
+              }}>
+                {winner.hand}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Seat geometry ────────────────────────────────────────────────────────────
@@ -345,39 +516,69 @@ function TableContent() {
   // The single gate on every action button: the server says it is our turn.
   const isHeroTurn = !!state && state.actingPlayerId === state.viewerId && legal !== null;
 
-  // The result is cleared as soon as the next hand starts, but the banner and
-  // the winner highlights should survive the reveal. Hold the last one until a
-  // new hand is dealt.
-  const [lastResult, setLastResult] = useState<{ handId: number; result: HandResult } | null>(null);
+  // ── Win announcement ──
+  //
+  // Taken as a *snapshot* off the server's payout payload rather than read from
+  // live state, because the two have different lifetimes: an uncontested win
+  // goes PAYOUT -> WAITING -> next hand within the same tick, so by the time
+  // the overlay is on screen `state.result` is already gone. Snapshotting is
+  // also what keeps this purely decorative — the overlay can never hold up a
+  // hand, because nothing waits on it.
+  const [announcement, setAnnouncement] = useState<WinAnnouncement | null>(null);
+  const [phase, setPhase] = useState<AnnouncePhase>("idle");
+  const announcedHandRef = useRef(-1);
+
   useEffect(() => {
-    if (!state) return;
-    const { handId, result } = state;
-    // Functional updates, and `lastResult` deliberately out of the dependency
-    // list: reading it here would re-run this on its own write and spin.
-    if (result) {
-      setLastResult((prev) => (prev?.handId === handId ? prev : { handId, result }));
-    } else {
-      setLastResult((prev) => (prev && prev.handId !== handId ? null : prev));
-    }
+    if (!state?.result) return;
+    // PAYOUT is the moment the chips actually move, on both the showdown and
+    // the uncontested path. Firing on SHOWDOWN instead would run the chip
+    // flight a full reveal-delay before the stacks changed.
+    if (state.street !== "PAYOUT") return;
+    if (announcedHandRef.current === state.result.handId) return;
+    announcedHandRef.current = state.result.handId;
+    setAnnouncement(buildAnnouncement(state, state.result));
   }, [state]);
 
-  const shownResult = isShowdown ? (state?.result ?? lastResult?.result ?? null) : null;
-  const winnerIds = useMemo(
-    () => (shownResult ? new Set(winningsByPlayer(shownResult).keys()) : new Set<string>()),
-    [shownResult],
-  );
-  const isHeroWinner = !!state && winnerIds.has(state.viewerId);
-  const banner = useMemo(
-    () => (shownResult && state ? resultBanner(shownResult, nameOf, state.viewerId) : ""),
-    [shownResult, state, nameOf],
-  );
-
-  const [bannerFading, setBannerFading] = useState(false);
+  // Chips fly first, then the text lands on top of them.
   useEffect(() => {
-    if (!banner) { setBannerFading(false); return; }
-    const id = setTimeout(() => setBannerFading(true), 3500);
-    return () => clearTimeout(id);
-  }, [banner]);
+    if (!announcement) { setPhase("idle"); return; }
+    setPhase("chips");
+    const toText = setTimeout(() => setPhase("text"), CHIP_FLIGHT_MS);
+    const toOut = setTimeout(() => setPhase("out"), CHIP_FLIGHT_MS + TEXT_IN_MS + TEXT_HOLD_MS);
+    const done = setTimeout(
+      () => setAnnouncement(null),
+      CHIP_FLIGHT_MS + TEXT_IN_MS + TEXT_HOLD_MS + TEXT_OUT_MS,
+    );
+    return () => { clearTimeout(toText); clearTimeout(toOut); clearTimeout(done); };
+  }, [announcement]);
+
+  // One flip drives every chip's transition, so they all leave together and
+  // the browser gets a committed starting position first (see `chipsReleased`).
+  const [chipsReleased, setChipsReleased] = useState(false);
+  useEffect(() => {
+    if (!announcement) { setChipsReleased(false); return; }
+    setChipsReleased(false);
+    // Two frames: the first paints the chips at the pot, the second moves
+    // them. Without the gap the transition has no start value to run from.
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setChipsReleased(true));
+    });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, [announcement]);
+
+  const winnerIds = useMemo(
+    () => new Set((announcement?.winners ?? []).map((w) => w.playerId)),
+    [announcement],
+  );
+  const isHeroWinner = !!announcement?.viewerWon;
+  const showWinText = phase === "text" || phase === "out";
+
+  /** One-line summary of the same snapshot, for the chat feed. */
+  const announcementText = useMemo(
+    () => (announcement ? announcementSummary(announcement) : ""),
+    [announcement],
+  );
 
   // ── Action clock, rendered from the server's deadline ──
   // The interval only re-renders the number; it is not a countdown of its own
@@ -440,12 +641,15 @@ function TableContent() {
     return () => ids.forEach(clearTimeout);
   }, [state]);
 
+  // The win tone lands with the text, and only for the viewer's own win —
+  // someone else taking the pot is information, not a fanfare.
   const wonSoundRef = useRef(-1);
   useEffect(() => {
-    if (!shownResult || !isHeroWinner || wonSoundRef.current === shownResult.handId) return;
-    wonSoundRef.current = shownResult.handId;
+    if (!announcement?.viewerWon || !showWinText) return;
+    if (wonSoundRef.current === announcement.handId) return;
+    wonSoundRef.current = announcement.handId;
     sounds.current.win();
-  }, [shownResult, isHeroWinner]);
+  }, [announcement, showWinText]);
 
   // ── Wallet ──
 
@@ -633,11 +837,11 @@ function TableContent() {
       handNum: state?.handId ?? 0,
       street: streetLabel(state),
       currentBet: state?.currentBet ?? 0,
-      banner,
+      banner: announcementText,
       winnerIds: winnerSeats,
       players,
     };
-  }, [state, seatActions, winnerIds, banner]);
+  }, [state, seatActions, winnerIds, announcementText]);
 
   const communityLabels = ["FLOP", "FLOP", "FLOP", "TURN", "RIVER"];
   const board: (CardData | null)[] = [0, 1, 2, 3, 4].map((i) => {
@@ -751,7 +955,7 @@ function TableContent() {
                             <CommunitySlot key={`${handId}-${i}-${card !== null}`} card={card} label={communityLabels[i]} flipDelay={i * 120} />
                           ))}
                         </div>
-                        {!banner && (
+                        {!showWinText && (
                           <div style={{ color: "rgba(255,255,255,0.2)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 2 }}>
                             {streetLabel(state)}
                           </div>
@@ -808,8 +1012,13 @@ function TableContent() {
                   })}
                 </div>
 
-                {/* Gold burst when the hero takes it down */}
-                {isShowdown && isHeroWinner && <WinBurst />}
+                {/* Pot sliding across to whoever won it, ahead of the text. */}
+                {announcement && (
+                  <ChipFlight announcement={announcement} released={chipsReleased} />
+                )}
+
+                {/* Gold burst when the hero takes it down — behind the text. */}
+                {showWinText && isHeroWinner && <WinBurst />}
 
                 {/* Hero seat */}
                 {hero && (
@@ -869,22 +1078,16 @@ function TableContent() {
                   </div>
                 )}
 
-                {/* Winner banner */}
-                {banner && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 50 }}>
-                    <div style={{
-                      background: isHeroWinner ? "rgba(16,185,129,0.96)" : "rgba(185,30,30,0.96)",
-                      color: "white", fontWeight: 900, fontSize: 18,
-                      padding: "16px 36px", borderRadius: 16,
-                      boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
-                      textShadow: "0 2px 8px rgba(0,0,0,0.4)",
-                      maxWidth: 560, textAlign: "center", lineHeight: 1.5,
-                      animation: "page-fade-in 0.3s ease-out",
-                      opacity: bannerFading ? 0 : 1,
-                      transition: "opacity 0.5s ease-out",
-                    }}>
-                      {banner}
-                    </div>
+                {/* Win announcement. Lives inside `.table-scene`, so it shrinks
+                    with the table and cannot overflow a phone; centred by flex
+                    rather than a translate, so the scale-in pivots on its own
+                    centre instead of the scene's layout box. */}
+                {announcement && showWinText && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                    style={{ zIndex: 65 }}
+                  >
+                    <WinAnnouncementCard announcement={announcement} leaving={phase === "out"} />
                   </div>
                 )}
 
@@ -934,7 +1137,7 @@ function TableContent() {
                       fly={HERO_FLY}
                       delay={i * seatCount * DEAL_STRIDE}
                       reveal
-                      isWinner={isHeroWinner && isShowdown}
+                      isWinner={isHeroWinner}
                       className={heroFolded ? "card-fold" : ""}
                     />
                   </div>
@@ -964,7 +1167,7 @@ function TableContent() {
             {isShowdown ? (
               <div className="flex justify-center items-center gap-3">
                 <span style={{ color: "#4b5563", fontSize: 13, fontWeight: 700 }}>
-                  {bannerFading ? "Dealing…" : "Next hand in a moment…"}
+                  {phase === "out" ? "Dealing…" : "Next hand in a moment…"}
                 </span>
               </div>
             ) : !hero ? (

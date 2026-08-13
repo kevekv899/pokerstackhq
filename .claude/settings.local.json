@@ -125,7 +125,8 @@
       "Bash(JWT_SECRET=stamp-test PORT=8124 RAILWAY_GIT_COMMIT_SHA=deadbeefcafe1234567890 node server/dist/server/index.js)",
       "Bash(curl -s http://127.0.0.1:8124/health)",
       "Bash(pkill -f \"server/dist/server/index.js\")",
-      "Bash(rm -f /tmp/stamp.log /tmp/stamp2.log)"
+      "Bash(rm -f /tmp/stamp.log /tmp/stamp2.log)",
+      "Bash(echo \"tsc=$?\")"
     ]
   }
 }
