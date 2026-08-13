@@ -310,7 +310,7 @@ function TableContent() {
   const cashoutDoneRef = useRef(false);
 
   // ── The one source of game truth ──
-  const { state, error, status, sendAction, actionDeadline, actionTimeoutMs } = useGameSocket({
+  const { state, error, status, sendAction, leave, actionDeadline, actionTimeoutMs } = useGameSocket({
     tableId,
     buyIn: BUY_IN_CHIPS,
     enabled: seatReady,
@@ -544,8 +544,20 @@ function TableContent() {
     };
   }, []);
 
+  const [leaving, setLeaving] = useState(false);
+
   async function handleLeaveTable(e: React.MouseEvent) {
     e.preventDefault();
+    if (leaving) return;
+    setLeaving(true);
+
+    // Give the seat up first and wait for the server to confirm. Simply
+    // navigating away drops the socket, which the server reads as a
+    // disconnect and holds the seat open for a reconnect — the player would
+    // stay sat at the table with their chips. Mid-hand this folds them; chips
+    // already in the pot are forfeit, so only the stack below is cashed out.
+    await leave();
+
     if (!cashoutDoneRef.current && buyinDoneRef.current) {
       cashoutDoneRef.current = true;
       await fetch("/api/table/cashout", {
@@ -645,10 +657,10 @@ function TableContent() {
       {/* ── Header ── */}
       <header className="table-header flex items-center justify-between shrink-0 px-2 md:px-4 gap-2 h-11" style={{ background: "#0a1410", borderBottom: "1px solid #1a2d1e" }}>
         <div className="flex items-center gap-2 md:gap-4 min-w-0">
-          <a href="/lobby" onClick={handleLeaveTable} className="text-[11px] md:text-sm transition-colors shrink-0 cursor-pointer whitespace-nowrap" style={{ color: "#4b5563" }}
+          <a href="/lobby" onClick={handleLeaveTable} className="text-[11px] md:text-sm transition-colors shrink-0 cursor-pointer whitespace-nowrap" style={{ color: "#4b5563", opacity: leaving ? 0.6 : 1 }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#e5e7eb")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#4b5563")}>
-            ← Lobby
+            {leaving ? "Leaving…" : "← Lobby"}
           </a>
           <span className="hdr-title text-white font-bold text-xs md:text-sm truncate">NL Texas Hold&apos;em</span>
           <span className="text-zinc-500 text-xs hidden sm:inline">

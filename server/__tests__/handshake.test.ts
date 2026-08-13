@@ -79,6 +79,43 @@ function authenticate(socket: WebSocket, token: unknown): Promise<
   });
 }
 
+/** Resolves on the next message of `type`, ignoring anything else in between. */
+function waitFor(socket: WebSocket, type: string, timeoutMs = 2000): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off('message', onMessage);
+      reject(new Error(`timed out waiting for "${type}"`));
+    }, timeoutMs);
+    function onMessage(raw: unknown) {
+      const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+      if (msg.type !== type) return;
+      clearTimeout(timer);
+      socket.off('message', onMessage);
+      resolve(msg);
+    }
+    socket.on('message', onMessage);
+  });
+}
+
+describe('leaving over the wire', () => {
+  it('acknowledges an explicit leave', async () => {
+    const token = await signPsToken({ userId: 7, username: 'leaver' });
+    const socket = await connect();
+
+    const authed = await authenticate(socket, token);
+    expect(authed.outcome).toBe('message');
+
+    socket.send(JSON.stringify({ type: 'join', tableId: 'leave-wire', buyIn: 200 }));
+    await waitFor(socket, 'state');
+
+    // The ack the client waits for before it navigates away.
+    const left = waitFor(socket, 'left');
+    socket.send(JSON.stringify({ type: 'leave' }));
+
+    expect(await left).toMatchObject({ type: 'left', tableId: 'leave-wire' });
+  });
+});
+
 describe('websocket auth handshake', () => {
   it('authenticates a valid ps_token', async () => {
     const token = await signPsToken({

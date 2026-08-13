@@ -114,7 +114,8 @@
       "Bash(cp server/room.ts __TRACKED_VAR__/room.ts.bak)",
       "Bash(python -c ' *)",
       "Bash(echo \"app tsc exit=$?\")",
-      "Bash(echo \"server build exit=$?\")"
+      "Bash(echo \"server build exit=$?\")",
+      "Bash(echo \"tsc exit=$?\")"
     ]
   }
 }

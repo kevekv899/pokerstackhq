@@ -134,17 +134,28 @@ export class Room {
   }
 
   /**
-   * Drops a player. Mid-hand they are folded (if it is their turn) and unseated
-   * once the hand finishes, so the engine never loses a live contender.
+   * Gives up a seat for good — the explicit counterpart to `disconnect()`,
+   * which holds the seat for a reconnect.
+   *
+   * Mid-hand the player is folded: immediately if they are on the clock, and
+   * otherwise as soon as action reaches them (see `afterChange`) — the engine
+   * refuses an out-of-turn fold, so it cannot be done here and now.
+   *
+   * Chips they have already put in stay in the pot and are won by whoever
+   * takes the hand. Nothing is refunded; only the stack still in front of them
+   * is theirs to cash out. The seat itself is released at the end of the hand
+   * (`finishHand`), so the engine never loses a live contender mid-hand.
    */
   leave(userId: string): void {
     if (!this.seats.has(userId)) {
+      this.confirmLeft(userId);
       this.sockets.delete(userId);
       return;
     }
 
     if (this.state.street === 'WAITING') {
       this.unseat(userId);
+      this.confirmLeft(userId);
       this.sockets.delete(userId);
       this.broadcast();
       return;
@@ -154,6 +165,9 @@ export class Room {
     if (this.actingPlayerId() === userId && !this.settling) {
       this.applyServerAction({ type: 'FOLD', playerId: userId });
     }
+    // Acknowledge before dropping the socket — this is the last thing they
+    // will hear from us, and the client waits for it before navigating away.
+    this.confirmLeft(userId);
     this.sockets.delete(userId);
     this.broadcast();
   }
@@ -287,6 +301,17 @@ export class Room {
       this.finishHand();
       return;
     }
+    // Someone who has left the table does not get a decision. The engine will
+    // not accept an out-of-turn fold, so this is the first moment their hand
+    // can be mucked — do it now rather than holding the table for a 20s clock
+    // on a player who is already gone.
+    const actor = this.actingPlayerId();
+    if (actor !== null && this.leaving.has(actor)) {
+      this.broadcast();
+      this.applyServerAction({ type: 'FOLD', playerId: actor });
+      return;
+    }
+
     // Arm before broadcasting: the clock's deadline rides along on every state
     // message, so re-arming afterwards would ship a decision with a stale (or
     // null) deadline and leave the client without a countdown until the next
@@ -422,6 +447,11 @@ export class Room {
 
   private error(userId: string, code: string, message: string): void {
     this.push(userId, { type: 'error', code, message });
+  }
+
+  /** Tells a leaver their seat is given up, so they can stop waiting on us. */
+  private confirmLeft(userId: string): void {
+    this.push(userId, { type: 'left', tableId: this.tableId });
   }
 
   private push(userId: string, payload: unknown): void {

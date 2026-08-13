@@ -62,6 +62,15 @@ export interface UseGameSocket {
   status: ConnectionStatus;
   sendAction: (action: GameAction) => void;
   /**
+   * Gives up the seat for good and stops reconnecting.
+   *
+   * Resolves once the server acknowledges, or after a short timeout if it
+   * never does — a slow ack must not trap someone on the table screen. Await
+   * this before navigating away: dropping the socket instead is read as a
+   * disconnect, and the server holds the seat open for a reconnect.
+   */
+  leave: () => Promise<void>;
+  /**
    * When the player on the clock runs out, as an epoch ms in *this browser's*
    * frame (server skew already removed). Null when nobody is on the clock.
    */
@@ -83,6 +92,9 @@ function backoffFor(attempt: number): number {
 const CLOSE_AUTH_FAILED = 4001;
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+
+/** How long to wait for the server's `left` ack before navigating anyway. */
+const LEAVE_ACK_TIMEOUT_MS = 1_500;
 
 /**
  * The app's session lives in the httpOnly `ps_token` cookie, which JavaScript
@@ -121,6 +133,14 @@ export function useGameSocket({
   const attemptRef = useRef(0);
   /** Set by cleanup so a socket we closed on purpose does not trigger a retry. */
   const disposedRef = useRef(false);
+  /**
+   * Set once the seat has been given up. Distinct from `disposedRef`: it also
+   * stops reconnection, because reconnecting would silently re-join the table
+   * and seat the player again.
+   */
+  const leftRef = useRef(false);
+  /** Resolves the pending `leave()` when the server's `left` ack arrives. */
+  const leaveAckRef = useRef<(() => void) | null>(null);
 
   // Read inside the socket callbacks without making them a dependency — a new
   // `getToken` identity must not tear down a healthy connection.
@@ -143,11 +163,14 @@ export function useGameSocket({
     }
 
     disposedRef.current = false;
+    // A fresh table (or a re-enable) is a new sitting, so a previous leave
+    // must not keep this one from connecting.
+    leftRef.current = false;
     attemptRef.current = 0;
 
     /** Schedules the next attempt, unless we are shutting down for good. */
     function retry(): void {
-      if (disposedRef.current) return;
+      if (disposedRef.current || leftRef.current) return;
       const delay = backoffFor(attemptRef.current);
       attemptRef.current += 1;
       setStatus("reconnecting");
@@ -155,7 +178,7 @@ export function useGameSocket({
     }
 
     async function connect(): Promise<void> {
-      if (disposedRef.current) return;
+      if (disposedRef.current || leftRef.current) return;
 
       let token: string | null = null;
       try {
@@ -197,6 +220,12 @@ export function useGameSocket({
           if (!parsed || typeof parsed !== "object") return;
           msg = parsed as Record<string, unknown>;
         } catch {
+          return;
+        }
+
+        // The seat is given up. Release whoever is waiting on `leave()`.
+        if (msg.type === "left") {
+          leaveAckRef.current?.();
           return;
         }
 
@@ -248,6 +277,13 @@ export function useGameSocket({
         setActionDeadline(null);
         if (disposedRef.current) return;
 
+        if (leftRef.current) {
+          // We gave the seat up on purpose. Reconnecting here would re-join
+          // the table and sit the player back down.
+          setStatus("disconnected");
+          return;
+        }
+
         if (event.code === CLOSE_AUTH_FAILED) {
           // A rejected token will be rejected again. Stop and surface it
           // rather than hammering the server.
@@ -265,6 +301,7 @@ export function useGameSocket({
       disposedRef.current = true;
       if (retryRef.current !== null) clearTimeout(retryRef.current);
       retryRef.current = null;
+      const wasJoined = joinedRef.current;
       joinedRef.current = false;
       const socket = socketRef.current;
       socketRef.current = null;
@@ -275,10 +312,87 @@ export function useGameSocket({
         socket.onmessage = null;
         socket.onerror = null;
         socket.onclose = null;
+        // Navigating off the table is leaving it, not losing the connection.
+        // Nothing can await the ack from inside a cleanup, so queue the frame
+        // and let the close handshake flush it; `leave()` is the path that
+        // actually waits. Harmless if `leave()` already ran — the server has
+        // no seat left to release.
+        if (wasJoined && socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.send(JSON.stringify({ type: "leave" }));
+          } catch {}
+        }
         socket.close();
       }
     };
   }, [tableId, buyIn, enabled]);
+
+  /**
+   * Tab close and mobile background. A WebSocket frame is the only way to
+   * reach the game server, so `sendBeacon` is no help — it speaks HTTP. Queue
+   * the leave and immediately close: the close handshake flushes what is
+   * already buffered, which is the best delivery available during unload.
+   *
+   * `pagehide` as well as `beforeunload` because Safari (and mobile browsers
+   * generally) often skip `beforeunload` entirely.
+   */
+  useEffect(() => {
+    function handleUnload() {
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !joinedRef.current) return;
+      leftRef.current = true;
+      joinedRef.current = false;
+      try {
+        socket.send(JSON.stringify({ type: "leave" }));
+        socket.close(1000, "leaving");
+      } catch {}
+    }
+    window.addEventListener("beforeunload", handleUnload);
+    window.addEventListener("pagehide", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+      window.removeEventListener("pagehide", handleUnload);
+    };
+  }, []);
+
+  const leave = useCallback((): Promise<void> => {
+    // Set first: this is what stops `onclose` from reconnecting and re-seating
+    // the player, whatever happens below.
+    const alreadyLeft = leftRef.current;
+    leftRef.current = true;
+    if (retryRef.current !== null) clearTimeout(retryRef.current);
+    retryRef.current = null;
+
+    const socket = socketRef.current;
+    if (alreadyLeft || !socket || socket.readyState !== WebSocket.OPEN || !joinedRef.current) {
+      // Never joined, already gone, or the socket is down — there is no seat
+      // for the server to release, so there is nothing to wait for.
+      joinedRef.current = false;
+      setStatus("disconnected");
+      return Promise.resolve();
+    }
+    joinedRef.current = false;
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        leaveAckRef.current = null;
+        setStatus("disconnected");
+        resolve();
+      };
+      // Don't strand the player on the table screen if the ack never lands.
+      const timer = setTimeout(finish, LEAVE_ACK_TIMEOUT_MS);
+      leaveAckRef.current = finish;
+      try {
+        socket.send(JSON.stringify({ type: "leave" }));
+      } catch {
+        finish();
+      }
+    });
+  }, []);
 
   const sendAction = useCallback((action: GameAction) => {
     const socket = socketRef.current;
@@ -301,6 +415,7 @@ export function useGameSocket({
     error,
     status,
     sendAction,
+    leave,
     actionDeadline,
     actionTimeoutMs,
   };

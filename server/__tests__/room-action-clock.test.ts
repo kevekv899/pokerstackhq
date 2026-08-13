@@ -21,6 +21,8 @@ class FakeSocket implements RoomSocket {
   }
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const rooms: Room[] = [];
 
 function table() {
@@ -66,17 +68,27 @@ describe('action clock broadcast', () => {
     expect(deadline! - serverTime).toBeLessThanOrEqual(ACTION_TIMEOUT_MS);
   });
 
-  it('re-arms for each decision, so the next player gets a fresh deadline', () => {
+  it('re-arms for each decision, so the next player gets a fresh deadline', async () => {
     const { room, a, b } = table();
     const first = a.latest('state');
     const firstActor = actingId(first) as string;
 
+    // Let some of the first player's clock run down. Without this the two
+    // arms can land in the same millisecond, which makes a fresh full span
+    // indistinguishable from the previous clock simply being left running.
+    await sleep(25);
     room.action(firstActor, 'CALL');
 
     const next = a.latest('state');
     expect(actingId(next)).not.toBe(firstActor);
-    expect(next?.actionDeadline).not.toBe(first?.actionDeadline);
-    expect((next?.actionDeadline as number) - (next?.serverTime as number)).toBeGreaterThan(0);
+
+    // The new player gets a whole decision's worth of time, not the remainder
+    // of the last one.
+    const remaining = (next?.actionDeadline as number) - (next?.serverTime as number);
+    expect(remaining).toBeGreaterThan(ACTION_TIMEOUT_MS - 50);
+    expect(remaining).toBeLessThanOrEqual(ACTION_TIMEOUT_MS);
+    expect(next?.actionDeadline as number).toBeGreaterThan(first?.actionDeadline as number);
+
     // Both players are told the same clock; it is the table's, not per-socket.
     expect(b.latest('state')?.actionDeadline).toBe(next?.actionDeadline);
   });
