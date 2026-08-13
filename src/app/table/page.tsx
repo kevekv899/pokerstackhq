@@ -449,8 +449,17 @@ function TableContent() {
 
   // ── Wallet ──
 
-  // `hand` is only used to phrase the in-app notification ("🏆 You won $47 with
-  // a Full House!"); the balance move ignores it.
+  // Notification only — deliberately NOT a balance move.
+  //
+  // Chips at this table are real money that already left the wallet at buy-in
+  // and comes back at cash-out. Settling each hand against the wallet as well
+  // would pay a win twice: once here, and again when the stack holding it is
+  // cashed out. The wallet is the truth for the account, the game server's
+  // `stack` is the truth for the table, and they only meet at buy-in/cash-out.
+  //
+  // `hand` is used to phrase the notification ("🏆 You won $47 with a Full
+  // House!"). The response still carries the real balance, so the header stays
+  // accurate without this having changed it.
   const reportGameResult = useCallback(
     async (type: "win" | "loss", amount: number, hand?: string) => {
       if (!buyinDoneRef.current || amount <= 0) return;
@@ -458,7 +467,13 @@ function TableContent() {
         const res = await fetch("/api/wallet/game-result", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type, amount: Math.round(amount * 100), hand, table: TABLE_NUMBER }),
+          body: JSON.stringify({
+            type,
+            amount: Math.round(amount * 100),
+            hand,
+            table: TABLE_NUMBER,
+            notifyOnly: true,
+          }),
         });
         if (res.ok) {
           const data = await res.json();

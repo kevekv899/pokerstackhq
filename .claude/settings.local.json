@@ -115,7 +115,8 @@
       "Bash(python -c ' *)",
       "Bash(echo \"app tsc exit=$?\")",
       "Bash(echo \"server build exit=$?\")",
-      "Bash(echo \"tsc exit=$?\")"
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(npx vite-node *)"
     ]
   }
 }

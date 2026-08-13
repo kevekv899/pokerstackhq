@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
-import { adjustBalance, insertTransaction } from "@/lib/db";
+import { adjustBalance, getBalance, insertTransaction } from "@/lib/db";
 import { createNotification, fmtUsd } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
@@ -29,21 +29,29 @@ export async function POST(req: NextRequest) {
 
     const amountCents = Math.round(amount);
 
-    const balance = await adjustBalance(
-      payload.userId,
-      type === "win" ? amountCents : -amountCents
-    );
+    // Tables that move real chips (buy-in on the way in, cash-out on the way
+    // out) must NOT also settle each hand here: the winnings are still sitting
+    // in the player's stack and would be credited a second time when they get
+    // up. Those callers pass `notifyOnly` and get the notification without the
+    // balance move. Callers that omit it keep the original behaviour.
+    const notifyOnly = body.notifyOnly === true;
 
-    const tx = await insertTransaction({
-      user_id: payload.userId,
-      type,
-      coin: "USD",
-      amount_usd: amountCents,
-      amount_crypto: "0",
-      address: "",
-      status: "completed",
-      tx_hash: "",
-    });
+    const balance = notifyOnly
+      ? await getBalance(payload.userId)
+      : await adjustBalance(payload.userId, type === "win" ? amountCents : -amountCents);
+
+    const tx = notifyOnly
+      ? null
+      : await insertTransaction({
+          user_id: payload.userId,
+          type,
+          coin: "USD",
+          amount_usd: amountCents,
+          amount_crypto: "0",
+          address: "",
+          status: "completed",
+          tx_hash: "",
+        });
 
     await createNotification(
       payload.userId,

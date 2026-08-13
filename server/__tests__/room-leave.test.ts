@@ -35,6 +35,7 @@ interface StateView {
   handId?: number;
   actingPlayerId?: string | null;
   totalPot?: number;
+  pots?: { amount: number; eligiblePlayerIds: string[] }[];
   seats?: { index: number; player: PublicPlayerView | null }[];
 }
 
@@ -225,6 +226,35 @@ describe('heads-up leave', () => {
     expect(gone.stack).toBe(990);
     // No chips invented or destroyed.
     expect(winner.stack + gone.stack).toBe(2000);
+  });
+
+  it('clears the pot out of the broadcast once the hand is paid', () => {
+    const { room, sockets } = table(2);
+
+    const a = stateOf(sockets.A)?.actingPlayerId as string;
+    room.action(a, 'CALL');
+    const b = stateOf(sockets.A)?.actingPlayerId as string;
+
+    room.leave(a);
+
+    // The client renders the pot straight from these two fields, so a hand
+    // that has been paid out has to leave BOTH empty. A stale `pots` here is
+    // what puts chips back in the middle of an idle table.
+    const final = stateOf(sockets[b]);
+    expect(final?.street).toBe('WAITING');
+    expect(final?.pots).toEqual([]);
+    expect(final?.totalPot).toBe(0);
+
+    // And not just the last message — nothing after the payout may carry one.
+    const waitingStates = sockets[b].messages
+      .filter((m) => m.type === 'state')
+      .map((m) => m.state as StateView)
+      .filter((s) => s?.street === 'WAITING');
+    expect(waitingStates.length).toBeGreaterThan(0);
+    for (const s of waitingStates) {
+      expect(s.pots).toEqual([]);
+      expect(s.totalPot).toBe(0);
+    }
   });
 
   it('ends the hand at once when the leaver was not the one to act', () => {
