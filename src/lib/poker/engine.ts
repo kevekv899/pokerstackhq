@@ -358,6 +358,53 @@ export function applyAction(state: TableState, action: Action): TableState {
 }
 
 /**
+ * Abandons `playerId`'s hand from wherever they sit — they left the table, or
+ * were removed from it.
+ *
+ * This exists because a fold through `applyAction` requires it to be your
+ * turn, and a player who has gone cannot wait for one. Only the *permission*
+ * differs: the muck and everything after it are the same as any other fold, so
+ * one contender left still ends the hand uncontested and their committed chips
+ * still belong to the pot.
+ *
+ * The action pointer only moves if the departing player was holding it;
+ * otherwise whoever is on the clock stays there.
+ */
+export function forfeitHand(state: TableState, playerId: string): TableState {
+  if (!BETTING_STREETS.includes(state.street)) {
+    throw new PokerError('WRONG_STREET', `Cannot forfeit a hand during ${state.street}`);
+  }
+
+  const next = clone(state);
+  const seat = findSeatOf(next, playerId);
+  const player = seat?.player;
+  if (!seat || !player) {
+    throw new PokerError('UNKNOWN_PLAYER', `No player ${playerId} at this table`);
+  }
+
+  // Already folded, sitting out, or all-in — an all-in player has no decision
+  // left to give up and stays in for the showdown their chips paid for.
+  if (player.status !== 'ACTIVE') return next;
+
+  const wasActing = next.actingIndex === seat.index;
+  player.status = 'FOLDED';
+  player.hasActed = true;
+  record(next, player.id, 'FOLD');
+
+  if (wasActing) {
+    advance(next, seat.index);
+    return next;
+  }
+
+  // Someone else is on the clock, so the pointer must not move — but the hand
+  // may still be over. This is the same test `advance()` makes after a fold.
+  if (contenders(next).length <= 1) {
+    endWithoutShowdown(next);
+  }
+  return next;
+}
+
+/**
  * `SHOWDOWN` -> `PAYOUT`. Moves the awarded chips into the winners' stacks.
  * Split out so a caller can render the reveal before the pot slides across.
  */
@@ -387,6 +434,10 @@ export function endHand(state: TableState): TableState {
   next.deck = [];
   next.burned = [];
   next.pendingBlinds = [];
+  // The pot has been paid out by now. `startHand` also clears this, which is
+  // why a stale pot normally goes unseen — but a table that cannot deal again
+  // sits in WAITING, and would keep showing chips in the middle.
+  next.pots = [];
   next.currentBet = 0;
   next.minRaise = next.bigBlind;
   next.lastAggressorIndex = null;

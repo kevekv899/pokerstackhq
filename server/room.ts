@@ -14,6 +14,7 @@ import {
   applyAction,
   createTable,
   endHand,
+  forfeitHand,
   getLegalActions,
   PokerError,
   seatPlayer,
@@ -28,6 +29,9 @@ import { ActionClock } from './clock.js';
 
 /** How long clients get to animate the reveal before chips move. */
 export const SHOWDOWN_REVEAL_MS = 4000;
+
+/** Streets on which a hand is still being contested and can be mucked. */
+const HAND_IS_LIVE: ReadonlySet<string> = new Set(['PREFLOP', 'FLOP', 'TURN', 'RIVER']);
 
 /** Actions a client is allowed to send. POST_BLIND is deliberately absent. */
 const CLIENT_ACTIONS: ReadonlySet<string> = new Set<ActionType>([
@@ -137,9 +141,11 @@ export class Room {
    * Gives up a seat for good — the explicit counterpart to `disconnect()`,
    * which holds the seat for a reconnect.
    *
-   * Mid-hand the player is folded: immediately if they are on the clock, and
-   * otherwise as soon as action reaches them (see `afterChange`) — the engine
-   * refuses an out-of-turn fold, so it cannot be done here and now.
+   * Mid-hand their hand is mucked at once, whoever happens to be on the clock
+   * (`forfeitHand`), which runs the same end-of-hand check as any other fold.
+   * That matters heads-up: folding them leaves one contender, so the hand ends
+   * uncontested there and then instead of the pot sitting in the middle while
+   * the remaining player waits on someone who has gone.
    *
    * Chips they have already put in stay in the pot and are won by whoever
    * takes the hand. Nothing is refunded; only the stack still in front of them
@@ -162,8 +168,12 @@ export class Room {
     }
 
     this.leaving.add(userId);
-    if (this.actingPlayerId() === userId && !this.settling) {
-      this.applyServerAction({ type: 'FOLD', playerId: userId });
+    // Muck their hand wherever the action happens to be. Folding only when it
+    // was their turn left the hand running on a player who had gone: heads-up
+    // that stranded the pot in the middle until the other player acted, since
+    // nothing had re-checked whether the hand was already over.
+    if (HAND_IS_LIVE.has(this.state.street) && !this.settling) {
+      this.forfeit(userId);
     }
     // Acknowledge before dropping the socket — this is the last thing they
     // will hear from us, and the client waits for it before navigating away.
@@ -301,17 +311,6 @@ export class Room {
       this.finishHand();
       return;
     }
-    // Someone who has left the table does not get a decision. The engine will
-    // not accept an out-of-turn fold, so this is the first moment their hand
-    // can be mucked — do it now rather than holding the table for a 20s clock
-    // on a player who is already gone.
-    const actor = this.actingPlayerId();
-    if (actor !== null && this.leaving.has(actor)) {
-      this.broadcast();
-      this.applyServerAction({ type: 'FOLD', playerId: actor });
-      return;
-    }
-
     // Arm before broadcasting: the clock's deadline rides along on every state
     // message, so re-arming afterwards would ship a decision with a stale (or
     // null) deadline and leave the client without a countdown until the next
@@ -398,6 +397,21 @@ export class Room {
     const legal = getLegalActions(this.state, playerId);
     const type: ActionType = legal?.canCheck ? 'CHECK' : 'FOLD';
     this.applyServerAction({ type, playerId });
+  }
+
+  /**
+   * Mucks the hand of someone who has left. Drives the identical follow-up to
+   * any other action, so the end-of-hand check is never skipped.
+   */
+  private forfeit(userId: string): void {
+    try {
+      this.state = forfeitHand(this.state, userId);
+    } catch (err) {
+      this.logPokerError('forfeit', err);
+      return;
+    }
+    this.clock.clear();
+    this.afterChange();
   }
 
   /** Applies an action the server decided on (timeout, forced fold on leave). */

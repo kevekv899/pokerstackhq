@@ -31,6 +31,7 @@ export {
   applyAction,
   createTable,
   endHand,
+  forfeitHand,
   getLegalActions,
   seatPlayer,
   settle,

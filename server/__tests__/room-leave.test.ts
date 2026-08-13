@@ -128,24 +128,21 @@ describe('leaving mid-hand', () => {
     expect(folded?.status).toBe('FOLDED');
   });
 
-  it('folds a leaver who was not on the clock as soon as action reaches them', () => {
+  it('folds a leaver who was not on the clock, without disturbing the action', () => {
     const { room, sockets, ids, observer } = table(3);
 
-    // Pick someone who is NOT to act, so the engine cannot fold them yet.
+    // Pick someone who is NOT to act. A normal fold is illegal here, but a
+    // player who has gone cannot be left holding a live hand.
     const actor = stateOf(observer)?.actingPlayerId as string;
     const waiting = ids.find((id) => id !== actor)!;
 
     room.leave(waiting);
-    // Still holding cards — the engine refuses an out-of-turn fold, so a leave
-    // cannot muck them on the spot.
-    expect(seatedPlayer(sockets.C, waiting)?.status).not.toBe('FOLDED');
 
-    // Play on. They are mucked the moment action arrives, rather than the
-    // table sitting through their 20 second clock.
-    actUntil(room, sockets.C, waiting);
-
-    expect(stateOf(sockets.C)?.actingPlayerId).not.toBe(waiting);
+    // Mucked on the spot, rather than the table waiting out their clock.
     expect(lastSeenPlayer(sockets.C, waiting)?.status).toBe('FOLDED');
+    // …and whoever was on the clock still is: mucking someone else's hand
+    // must not move the action.
+    expect(stateOf(sockets.C)?.actingPlayerId).toBe(actor);
   });
 
   it('leaves committed chips in the pot and refunds nothing', () => {
@@ -228,6 +225,34 @@ describe('heads-up leave', () => {
     expect(gone.stack).toBe(990);
     // No chips invented or destroyed.
     expect(winner.stack + gone.stack).toBe(2000);
+  });
+
+  it('ends the hand at once when the leaver was not the one to act', () => {
+    const { room, sockets } = table(2);
+
+    // A commits chips…
+    const a = stateOf(sockets.A)?.actingPlayerId as string;
+    room.action(a, 'CALL');
+
+    // …and B has committed the big blind, and now holds the option.
+    const b = stateOf(sockets.A)?.actingPlayerId as string;
+    expect(b).not.toBe(a);
+    expect(stateOf(sockets.A)?.totalPot).toBe(20);
+
+    // A leaves while it is B's turn. Folding A leaves exactly one contender,
+    // so the hand is over — B must not be left waiting on a player who has
+    // gone. Asserted with no sleep and no timer: this has to be immediate.
+    room.leave(a);
+
+    const stayer = lastSeenPlayer(sockets[b], b)!;
+    const gone = lastSeenPlayer(sockets[b], a)!;
+
+    expect(stayer.stack).toBe(1010);
+    expect(gone.stack).toBe(990);
+    expect(stayer.stack + gone.stack).toBe(2000);
+    // Pot delivered and the table is idle again, ready for the next sitting.
+    expect(stateOf(sockets[b])?.street).toBe('WAITING');
+    expect(stateOf(sockets[b])?.totalPot).toBe(0);
   });
 });
 
