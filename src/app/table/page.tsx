@@ -660,6 +660,7 @@ function TableContent() {
   // would pay a win twice: once here, and again when the stack holding it is
   // cashed out. The wallet is the truth for the account, the game server's
   // `stack` is the truth for the table, and they only meet at buy-in/cash-out.
+  // The route moves nothing unless a caller opts in with `settleBalance`.
   //
   // `hand` is used to phrase the notification ("🏆 You won $47 with a Full
   // House!"). The response still carries the real balance, so the header stays
@@ -676,7 +677,6 @@ function TableContent() {
             amount: Math.round(amount * 100),
             hand,
             table: TABLE_NUMBER,
-            notifyOnly: true,
           }),
         });
         if (res.ok) {

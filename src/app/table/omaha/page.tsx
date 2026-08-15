@@ -470,6 +470,14 @@ function OmahaTableContent() {
   useEffect(() => { gameRef.current = game; }, [game]);
   const heroChipsAtHandStartRef = useRef(game.players[0].chips);
 
+  // Notification only — deliberately NOT a balance move.
+  //
+  // Chips at this table are real money that already left the wallet at buy-in
+  // and comes back at cash-out. Settling each hand against the wallet as well
+  // would pay a win twice: once here, and again when the stack holding it is
+  // cashed out via `finalChips`. The route does not move a balance unless a
+  // caller opts in with `settleBalance`, so omitting it is the whole point.
+  // The response still carries the real balance, so the header stays accurate.
   async function reportGameResult(type: "win"|"loss", amount: number) {
     if (!buyinDoneRef.current || amount<=0) return;
     try {

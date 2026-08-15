@@ -29,20 +29,29 @@ export async function POST(req: NextRequest) {
 
     const amountCents = Math.round(amount);
 
-    // Tables that move real chips (buy-in on the way in, cash-out on the way
-    // out) must NOT also settle each hand here: the winnings are still sitting
-    // in the player's stack and would be credited a second time when they get
-    // up. Those callers pass `notifyOnly` and get the notification without the
-    // balance move. Callers that omit it keep the original behaviour.
-    const notifyOnly = body.notifyOnly === true;
+    // Moving money is opt-in, and deliberately so.
+    //
+    // A table that takes a buy-in on the way in and returns chips at cash-out
+    // has already accounted for the win: it is sitting in the player's stack.
+    // Settling here as well pays it twice. That is the shape of every caller
+    // today, so the safe behaviour is the default and a caller that genuinely
+    // wants the balance moved has to say so. Forgetting the flag under-reports
+    // a balance, which is visible and recoverable; the old default silently
+    // doubled real money.
+    const settleBalance = body.settleBalance === true;
 
-    const balance = notifyOnly
-      ? await getBalance(payload.userId)
-      : await adjustBalance(payload.userId, type === "win" ? amountCents : -amountCents);
+    const balance = settleBalance
+      ? await adjustBalance(payload.userId, type === "win" ? amountCents : -amountCents)
+      : await getBalance(payload.userId);
 
-    const tx = notifyOnly
-      ? null
-      : await insertTransaction({
+    // Without a balance there is no meaningful reply, and returning null would
+    // have the client render the player's balance as $0.00.
+    if (balance === null) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const tx = settleBalance
+      ? await insertTransaction({
           user_id: payload.userId,
           type,
           coin: "USD",
@@ -51,7 +60,8 @@ export async function POST(req: NextRequest) {
           address: "",
           status: "completed",
           tx_hash: "",
-        });
+        })
+      : null;
 
     await createNotification(
       payload.userId,
