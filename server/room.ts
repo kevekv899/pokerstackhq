@@ -23,6 +23,7 @@ import {
   toPublicState,
   type Action,
   type ActionType,
+  type GameVariant,
   type TableState,
 } from '../src/lib/poker/index.js';
 import { ActionClock } from './clock.js';
@@ -51,6 +52,8 @@ export interface RoomSocket {
 
 export interface RoomOptions {
   tableId: string;
+  /** Which rules this room runs. Defaults to Hold'em. */
+  variant?: GameVariant;
   seatCount?: number;
   smallBlind?: number;
   bigBlind?: number;
@@ -86,6 +89,7 @@ export class Room {
     this.clock = new ActionClock(options.actionTimeoutMs);
     this.state = createTable({
       tableId: options.tableId,
+      variant: options.variant ?? 'HOLDEM',
       seatCount: options.seatCount ?? 6,
       smallBlind: options.smallBlind ?? 5,
       bigBlind: options.bigBlind ?? 10,

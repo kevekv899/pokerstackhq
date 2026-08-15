@@ -126,7 +126,8 @@
       "Bash(curl -s http://127.0.0.1:8124/health)",
       "Bash(pkill -f \"server/dist/server/index.js\")",
       "Bash(rm -f /tmp/stamp.log /tmp/stamp2.log)",
-      "Bash(echo \"tsc=$?\")"
+      "Bash(echo \"tsc=$?\")",
+      "Bash(echo \"server build=$?\")"
     ]
   }
 }

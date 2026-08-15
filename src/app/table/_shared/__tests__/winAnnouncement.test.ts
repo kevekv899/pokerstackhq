@@ -30,7 +30,7 @@ function seat(index: number, id: string | null, isViewer = false): PublicSeat {
 
 function tableWith(seats: PublicSeat[], viewerId = "hero"): PublicTableState {
   return {
-    tableId: 't', handId: 7, street: 'PAYOUT', buttonIndex: 0,
+    tableId: 't', variant: 'HOLDEM', handId: 7, street: 'PAYOUT', buttonIndex: 0,
     smallBlind: 5, bigBlind: 10, board: [], seats,
     actingIndex: null, actingPlayerId: null, currentBet: 0, minRaise: 10,
     pots: [], totalPot: 0, history: [], result: null,

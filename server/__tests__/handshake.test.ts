@@ -116,6 +116,25 @@ describe('leaving over the wire', () => {
   });
 });
 
+describe('table variant', () => {
+  it('runs Omaha rules for an omaha table id, and Hold’em otherwise', async () => {
+    // The variant is derived from the id server-side; a client cannot ask for
+    // one set of rules at a table running the other.
+    for (const [tableId, expected] of [
+      ['omaha-4822', 'OMAHA'],
+      ['holdem-4821', 'HOLDEM'],
+      ['some-other-table', 'HOLDEM'],
+    ] as const) {
+      const socket = await connect();
+      await authenticate(socket, await signPsToken({ userId: 11, username: 'v' }));
+      socket.send(JSON.stringify({ type: 'join', tableId, buyIn: 200 }));
+
+      const msg = await waitFor(socket, 'state');
+      expect((msg.state as { variant?: string }).variant, tableId).toBe(expected);
+    }
+  });
+});
+
 describe('websocket auth handshake', () => {
   it('authenticates a valid ps_token', async () => {
     const token = await signPsToken({

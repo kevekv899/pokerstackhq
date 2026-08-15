@@ -1,7 +1,8 @@
 import { createDeck, shuffle } from './deck';
-import { evaluate7 } from './evaluator';
+import { evaluate7, evaluateOmaha } from './evaluator';
 import { awardPots, buildPots, payoutsFromAwards, potTotal } from './pot';
 import {
+  HOLE_CARDS,
   PokerError,
   type Action,
   type Card,
@@ -11,6 +12,7 @@ import {
   type Player,
   type PublicSeat,
   type PublicTableState,
+  type GameVariant,
   type Seat,
   type ShowdownEntry,
   type Street,
@@ -32,6 +34,8 @@ export interface SeatAssignment {
 
 export interface TableConfig {
   tableId: string;
+  /** Defaults to Hold'em, so existing callers are unaffected. */
+  variant?: GameVariant;
   seatCount: number;
   smallBlind: number;
   bigBlind: number;
@@ -50,6 +54,7 @@ export function createTable(config: TableConfig): TableState {
 
   const state: TableState = {
     tableId: config.tableId,
+    variant: config.variant ?? 'HOLDEM',
     handId: 0,
     street: 'WAITING',
     seats,
@@ -200,8 +205,10 @@ export function startHand(state: TableState, options: StartHandOptions = {}): Ta
     (p) => p.status === 'ACTIVE',
   ) as number;
 
-  // Two cards each, one at a time, starting to the left of the button.
-  for (let round = 0; round < 2; round += 1) {
+  // One card at a time around the table, starting to the left of the button —
+  // two rounds for Hold'em, four for Omaha.
+  const holeCards = HOLE_CARDS[next.variant];
+  for (let round = 0; round < holeCards; round += 1) {
     let seatIndex = button;
     for (let dealt = 0; dealt < dealtIn.length; dealt += 1) {
       seatIndex = nextSeatWhere(next, seatIndex, (p) => p.status === 'ACTIVE') as number;
@@ -743,6 +750,17 @@ function endWithoutShowdown(state: TableState): void {
   record(state, null, 'PAYOUT');
 }
 
+/**
+ * Scores a hand under the table's rules. The only place the two variants
+ * actually diverge at showdown: Hold'em takes the best five of all seven,
+ * Omaha must use exactly two hole cards and exactly three from the board.
+ */
+function evaluateHand(state: TableState, holeCards: readonly Card[]): HandValue {
+  return state.variant === 'OMAHA'
+    ? evaluateOmaha(holeCards, state.board)
+    : evaluate7([...holeCards, ...state.board]);
+}
+
 function goToShowdown(state: TableState): void {
   state.street = 'SHOWDOWN';
   state.actingIndex = null;
@@ -752,7 +770,7 @@ function goToShowdown(state: TableState): void {
 
   for (const player of contenders(state)) {
     player.revealed = true;
-    const hand = evaluate7([...player.holeCards, ...state.board]);
+    const hand = evaluateHand(state, player.holeCards);
     strengths.set(player.id, hand);
     entries.push({
       playerId: player.id,
@@ -908,6 +926,7 @@ export function toPublicState(state: TableState, viewerId: string): PublicTableS
 
   return {
     tableId: state.tableId,
+    variant: state.variant,
     handId: state.handId,
     street: state.street,
     buttonIndex: state.buttonIndex,

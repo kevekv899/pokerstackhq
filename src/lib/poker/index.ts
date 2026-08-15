@@ -55,7 +55,7 @@ export {
   type RandomSource,
 } from './deck';
 
-export { compareHands, evaluate7, handRankName, rankValue } from './evaluator';
+export { compareHands, evaluate7, evaluateOmaha, handRankName, rankValue } from './evaluator';
 
 export {
   awardPots,
@@ -67,6 +67,7 @@ export {
 
 export {
   HandRank,
+  HOLE_CARDS,
   PokerError,
   RANK_VALUE,
   RANKS,
@@ -75,6 +76,7 @@ export {
   type ActionType,
   type BlindKind,
   type Card,
+  type GameVariant,
   type HandEvent,
   type HandResult,
   type HandValue,

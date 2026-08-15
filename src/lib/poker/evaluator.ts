@@ -224,6 +224,69 @@ export function evaluate7(cards: readonly Card[]): HandValue {
   };
 }
 
+/** Every k-sized combination of `items`, order irrelevant. */
+function combinations<T>(items: readonly T[], k: number): T[][] {
+  if (k === 0) return [[]];
+  if (items.length < k) return [];
+  const out: T[][] = [];
+  const pick = (start: number, chosen: T[]): void => {
+    if (chosen.length === k) {
+      out.push(chosen.slice());
+      return;
+    }
+    for (let i = start; i < items.length; i += 1) {
+      chosen.push(items[i]);
+      pick(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  pick(0, []);
+  return out;
+}
+
+/**
+ * Evaluates an Omaha hand: the best five cards using **exactly two** hole
+ * cards and **exactly three** board cards.
+ *
+ * That restriction is the whole game, and it is why Hold'em's "best five of
+ * the seven" is wrong here rather than merely slower. Four hearts on the board
+ * and one in your hand is not a flush in Omaha, because a second heart would
+ * have to come from your hand and you only hold one. Equally, a hand that
+ * would be stronger using one or three hole cards does not count — the two/
+ * three split is mandatory, not an upper bound.
+ *
+ * With four hole cards and five board cards that is 6 x 10 = 60 five-card
+ * hands; the best of them wins.
+ */
+export function evaluateOmaha(
+  holeCards: readonly Card[],
+  board: readonly Card[],
+): HandValue {
+  if (holeCards.length < 2) {
+    throw new PokerError(
+      'INVALID_CARDS',
+      `Omaha needs at least 2 hole cards, got ${holeCards.length}`,
+    );
+  }
+  if (board.length < 3) {
+    throw new PokerError(
+      'INVALID_CARDS',
+      `Omaha needs at least 3 board cards, got ${board.length}`,
+    );
+  }
+
+  let best: HandValue | null = null;
+  for (const pair of combinations(holeCards, 2)) {
+    for (const trio of combinations(board, 3)) {
+      const hand = evaluate7([...pair, ...trio]);
+      if (best === null || compareHands(hand, best) > 0) best = hand;
+    }
+  }
+  // Unreachable: both loops are non-empty given the guards above.
+  if (best === null) throw new PokerError('INVALID_CARDS', 'No legal Omaha hand');
+  return best;
+}
+
 /**
  * Orders two evaluated hands. Positive when `a` wins, negative when `b` wins,
  * 0 for an exact tie (a split pot).

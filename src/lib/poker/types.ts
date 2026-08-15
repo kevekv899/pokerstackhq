@@ -159,6 +159,18 @@ export interface PotAward {
 // Streets and actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Which rules a table runs. The difference is exactly two things: how many
+ * hole cards are dealt, and whether a hand must use exactly two of them.
+ */
+export type GameVariant = 'HOLDEM' | 'OMAHA';
+
+/** Hole cards dealt per player, per variant. */
+export const HOLE_CARDS: Readonly<Record<GameVariant, number>> = {
+  HOLDEM: 2,
+  OMAHA: 4,
+};
+
 export type Street =
   | 'WAITING'
   | 'PREFLOP'
@@ -241,6 +253,8 @@ export interface RngState {
 
 export interface TableState {
   tableId: string;
+  /** Which rules this table runs; fixed for the life of the table. */
+  variant: GameVariant;
   handId: number;
   street: Street;
   seats: Seat[];
@@ -316,6 +330,7 @@ export interface LegalActions {
 
 export interface PublicTableState {
   tableId: string;
+  variant: GameVariant;
   handId: number;
   street: Street;
   buttonIndex: number;
