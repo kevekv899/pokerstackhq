@@ -23,6 +23,7 @@ import {
 import type { CardData, FlyFrom, SeatAction, Suit } from "./_shared/ui";
 import { BetPill, OpponentSeat } from "./_shared/seat";
 import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "./_shared/useFitScale";
+import { HOLDEM_TABLE_NUMBER, tableIdFor } from "./_shared/tables";
 import {
   announcementSummary, buildAnnouncement, winningsByPlayer,
   type WinAnnouncement, type WinnerLine,
@@ -40,8 +41,9 @@ import type {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const TABLE_NUMBER = 4821;
-const DEFAULT_TABLE_ID = `holdem-${TABLE_NUMBER}`;
+const TABLE_NUMBER = HOLDEM_TABLE_NUMBER;
+/** The rules this page is drawn for; everything below assumes two hole cards. */
+const PAGE_VARIANT = "HOLDEM" as const;
 /** Chips bought with the $200 wallet buy-in — one chip is one dollar. */
 const BUY_IN_CHIPS = 200;
 const AVATARS = ["😎", "🤠", "👑", "🎩", "🦈", "🐉"];
@@ -451,7 +453,10 @@ function ReconnectingStrip() {
 
 function TableContent() {
   const searchParams = useSearchParams();
-  const tableId = searchParams.get("table") ?? DEFAULT_TABLE_ID;
+  // The server reads the variant off the id it is handed, so a `?table=`
+  // override naming an Omaha table is dropped rather than forwarded — this felt
+  // is drawn for two hole cards.
+  const tableId = tableIdFor(PAGE_VARIANT, searchParams.get("table"));
   const router = useRouter();
 
   // One scale factor for every screen. The scene is measured against the box

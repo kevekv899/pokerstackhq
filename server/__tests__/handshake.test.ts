@@ -13,6 +13,8 @@ import type { AddressInfo } from 'node:net';
 import { SignJWT } from 'jose';
 import { WebSocket } from 'ws';
 
+import { HOLDEM_TABLE_ID, OMAHA_TABLE_ID } from '../../src/app/table/_shared/tables.js';
+
 const SECRET_VALUE = 'handshake-test-secret';
 
 // Must be set before importing the server: it reads JWT_SECRET at module load
@@ -120,9 +122,11 @@ describe('table variant', () => {
   it('runs Omaha rules for an omaha table id, and Hold’em otherwise', async () => {
     // The variant is derived from the id server-side; a client cannot ask for
     // one set of rules at a table running the other.
+    // The page ids come from the pages' own module: what they join is what is
+    // asserted here, so the two cannot drift apart again.
     for (const [tableId, expected] of [
-      ['omaha-4822', 'OMAHA'],
-      ['holdem-4821', 'HOLDEM'],
+      [OMAHA_TABLE_ID, 'OMAHA'],
+      [HOLDEM_TABLE_ID, 'HOLDEM'],
       ['some-other-table', 'HOLDEM'],
     ] as const) {
       const socket = await connect();

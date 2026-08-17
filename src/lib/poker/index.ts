@@ -72,6 +72,7 @@ export {
   RANK_VALUE,
   RANKS,
   SUITS,
+  variantForTableId,
   type Action,
   type ActionType,
   type BlindKind,

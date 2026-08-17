@@ -7,7 +7,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { encodeSecret, verifySessionToken } from './auth.js';
 import { isOriginAllowed } from './origin.js';
 import { Room } from './room.js';
-import type { GameVariant } from '../src/lib/poker/index.js';
+import { roomFor } from './rooms.js';
 
 // This project keeps its vars in `.env.local` (Next.js convention), so plain
 // `dotenv/config` would find nothing. Real env vars always win over both files.
@@ -111,33 +111,6 @@ const server = createServer((req, res) => {
   res.writeHead(404, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: 'not_found' }));
 });
-
-// ---------------------------------------------------------------------------
-// Rooms
-// ---------------------------------------------------------------------------
-
-const rooms = new Map<string, Room>();
-
-/**
- * Which rules a table runs, decided by its id.
- *
- * Deliberately derived here rather than taken from the `join` message: the
- * variant decides how many hole cards are dealt and how hands are scored, so
- * letting a client name it would let one ask for Omaha rules at a Hold'em
- * table — or set the rules for everyone else by being first through the door.
- */
-function variantFor(tableId: string): GameVariant {
-  return tableId.toLowerCase().startsWith('omaha') ? 'OMAHA' : 'HOLDEM';
-}
-
-function roomFor(tableId: string): Room {
-  let room = rooms.get(tableId);
-  if (!room) {
-    room = new Room({ tableId, variant: variantFor(tableId) });
-    rooms.set(tableId, room);
-  }
-  return room;
-}
 
 // ---------------------------------------------------------------------------
 // WebSocket

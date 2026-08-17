@@ -31,6 +31,7 @@ import {
 import type { CardData, FlyFrom, SeatAction, Suit } from "../_shared/ui";
 import { BetPill, OpponentSeat } from "../_shared/seat";
 import { OVAL_FIT, SCENE_H, SCENE_W, useFitScale } from "../_shared/useFitScale";
+import { OMAHA_TABLE_NUMBER, tableIdFor } from "../_shared/tables";
 import {
   announcementSummary, buildAnnouncement, winningsByPlayer,
   type WinAnnouncement, type WinnerLine,
@@ -49,9 +50,9 @@ import type {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-const TABLE_NUMBER = 4822;
-// The server reads the variant off this id — see `variantFor` in server/index.ts.
-const DEFAULT_TABLE_ID = `omaha-${TABLE_NUMBER}`;
+const TABLE_NUMBER = OMAHA_TABLE_NUMBER;
+/** The rules this page is drawn for; everything below assumes four hole cards. */
+const PAGE_VARIANT = "OMAHA" as const;
 /** Chips bought with the $200 wallet buy-in — one chip is one dollar. */
 const BUY_IN_CHIPS = 200;
 const AVATARS = ["😎", "🤠", "👑", "🎩", "🦈", "🐉"];
@@ -454,6 +455,54 @@ function ConnectionCover({ status, error }: { status: ConnectionStatus; error: s
   );
 }
 
+/**
+ * Shown instead of the table when the server is not running Omaha.
+ *
+ * The variant is the server's to decide, so this is the last line of defence
+ * for the one thing this page cannot fake: a Hold'em room would hand it a
+ * two-card hand, which the felt would draw as though it were an Omaha hand
+ * missing half its cards, and the pot-limit sizing and 2-of-4 hand reading the
+ * player is counting on would not be the rules in play. Better to stop.
+ */
+function VariantMismatch({
+  variant, tableId, onLeave, leaving,
+}: {
+  variant: string;
+  tableId: string;
+  onLeave: (e: React.MouseEvent) => void;
+  leaving: boolean;
+}) {
+  return (
+    <div
+      role="alert"
+      className="h-[100dvh] flex flex-col items-center justify-center gap-4 px-6 text-center"
+      style={{ background: "#060d08" }}
+    >
+      <span style={{ fontSize: 34 }} aria-hidden>♠️♦️</span>
+      <h1 style={{ color: "#f87171", fontSize: 20, fontWeight: 900, letterSpacing: 0.3 }}>
+        This table is not running Omaha
+      </h1>
+      <p style={{ color: "#9ca3af", fontSize: 13.5, maxWidth: 420, lineHeight: 1.6 }}>
+        The server reports table <span style={{ color: "#e5e7eb", fontFamily: "monospace" }}>{tableId}</span>{" "}
+        is dealing <span style={{ color: "#e5e7eb", fontWeight: 700 }}>{variant}</span>, not Omaha. This page
+        is only safe to play as Pot-Limit Omaha, so it will not deal you a hand
+        under the wrong rules.
+      </p>
+      <a
+        href="/lobby"
+        onClick={onLeave}
+        className="rounded-lg font-black transition-colors"
+        style={{
+          background: "#b45309", color: "#fef3c7", fontSize: 13,
+          padding: "9px 20px", opacity: leaving ? 0.6 : 1,
+        }}
+      >
+        {leaving ? "Leaving…" : "← Back to the lobby"}
+      </a>
+    </div>
+  );
+}
+
 /** Non-blocking strip: the table is still on screen and still readable. */
 function ReconnectingStrip() {
   return (
@@ -474,7 +523,11 @@ function ReconnectingStrip() {
 
 function OmahaTableContent() {
   const searchParams = useSearchParams();
-  const tableId = searchParams.get("table") ?? DEFAULT_TABLE_ID;
+  // The server reads the variant off the id it is handed, so this page may only
+  // ever join one it resolves as Omaha — a Hold'em id here would be dealt two
+  // hole cards onto a felt drawn for four. A `?table=` override for the other
+  // variant is dropped, not forwarded.
+  const tableId = tableIdFor(PAGE_VARIANT, searchParams.get("table"));
   const router = useRouter();
 
   // One scale factor for every screen. The scene is measured against the box
@@ -892,6 +945,21 @@ function OmahaTableContent() {
   // a drop shows as a strip instead, so the table stays readable.
   const showCover = status === "disconnected" || (!state && status !== "connected");
   const showStrip = status === "reconnecting" && !!state;
+
+  // Every hook above has run, so this is a safe place to bail out. The check is
+  // deliberately on what the *server* said rather than on the id we sent: if
+  // those two ever disagree again, this is what makes it loud instead of a
+  // Hold'em hand quietly dealt onto an Omaha felt.
+  if (state && state.variant !== PAGE_VARIANT) {
+    return (
+      <VariantMismatch
+        variant={state.variant}
+        tableId={state.tableId}
+        onLeave={handleLeaveTable}
+        leaving={leaving}
+      />
+    );
+  }
 
   return (
     <div className="h-[100dvh] text-white flex flex-col overflow-hidden" style={{ background: "#060d08", userSelect: "none" }}>

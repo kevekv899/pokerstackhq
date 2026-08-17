@@ -171,6 +171,20 @@ export const HOLE_CARDS: Readonly<Record<GameVariant, number>> = {
   OMAHA: 4,
 };
 
+/**
+ * Which rules the table with this id runs.
+ *
+ * The one definition of the convention, because two sides depend on it and
+ * must not drift: the server decides a room's variant from its id (a client is
+ * never allowed to name it — see `roomFor` in server/rooms.ts), and a table
+ * page must therefore join an id that resolves to the variant it is drawn for.
+ * A page joining an id this reads as HOLDEM gets two hole cards, whatever the
+ * page thinks it is rendering.
+ */
+export function variantForTableId(tableId: string): GameVariant {
+  return tableId.toLowerCase().startsWith('omaha') ? 'OMAHA' : 'HOLDEM';
+}
+
 export type Street =
   | 'WAITING'
   | 'PREFLOP'
