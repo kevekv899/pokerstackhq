@@ -209,6 +209,18 @@ wss.on('connection', (socket: WebSocket) => {
         return;
       }
 
+      case 'chat': {
+        if (!sess.room) {
+          send(sock, { type: 'error', code: 'UNKNOWN_PLAYER', message: 'Join a table first' });
+          return;
+        }
+        // Only the text crosses over. Who said it comes from the session this
+        // socket authenticated as, and when from the room's own clock — see
+        // `Room.chat`. Anything else on the message is ignored.
+        sess.room.chat(sess.userId, msg.text);
+        return;
+      }
+
       case 'leave': {
         if (sess.room) sess.room.leave(sess.userId);
         sess.room = null;

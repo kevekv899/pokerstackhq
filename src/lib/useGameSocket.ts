@@ -12,8 +12,11 @@
  *   -> { type: 'auth',  token }              first message on every connection
  *   <- { type: 'state', state: null, authenticated: true }
  *   -> { type: 'join',  tableId, buyIn }
+ *   <- { type: 'chatHistory', messages }     the room's backlog, on join
  *   <- { type: 'state' | 'showdown' | 'handEnd', state, ... }
  *   -> { type: 'action', action, amount? }
+ *   -> { type: 'chat',   text }
+ *   <- { type: 'chat',   userId, username, text, at }
  *   <- { type: 'error', code, message }
  */
 
@@ -29,6 +32,20 @@ export interface GameAction {
   type: GameActionType;
   /** For BET/RAISE: the total "to" amount for the round, not the increment. */
   amount?: number;
+}
+
+/**
+ * A chat line as the server sent it.
+ *
+ * Every field is the server's, including who said it and when. Nothing here is
+ * ever built locally — see `sendChat`.
+ */
+export interface ChatMessage {
+  userId: string;
+  username: string;
+  text: string;
+  /** Epoch ms, on the *server's* clock. */
+  at: number;
 }
 
 export type ConnectionStatus =
@@ -60,7 +77,19 @@ export interface UseGameSocket {
   connected: boolean;
   error: string | null;
   status: ConnectionStatus;
+  /**
+   * The room's chat, oldest first, exactly as the server ordered it. Starts
+   * from the backlog the server sends on join.
+   */
+  chatMessages: ChatMessage[];
   sendAction: (action: GameAction) => void;
+  /**
+   * Sends a chat line. Nothing appears locally until the server echoes it
+   * back: rendering our own message early would put it where *we* sent it
+   * rather than where the room received it, so no two players would be
+   * reading the same conversation.
+   */
+  sendChat: (text: string) => void;
   /**
    * Gives up the seat for good and stops reconnecting.
    *
@@ -93,6 +122,22 @@ const CLOSE_AUTH_FAILED = 4001;
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+/**
+ * Mirrors the room's own limits (`server/room.ts`). Trimming here keeps a
+ * doomed message off the wire; the server enforces both regardless.
+ */
+const CHAT_MAX_LENGTH = 200;
+const CHAT_KEEP = 50;
+
+/** Reads a chat line off the wire, or null if it is not one. */
+function toChatMessage(raw: unknown): ChatMessage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const msg = raw as Record<string, unknown>;
+  if (typeof msg.userId !== "string" || typeof msg.username !== "string") return null;
+  if (typeof msg.text !== "string" || typeof msg.at !== "number") return null;
+  return { userId: msg.userId, username: msg.username, text: msg.text, at: msg.at };
+}
+
 /** How long to wait for the server's `left` ack before navigating anyway. */
 const LEAVE_ACK_TIMEOUT_MS = 1_500;
 
@@ -121,6 +166,7 @@ export function useGameSocket({
   getToken,
 }: UseGameSocketOptions): UseGameSocket {
   const [state, setState] = useState<PublicTableState | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? "connecting" : "disconnected");
   const [error, setError] = useState<string | null>(null);
   const [actionDeadline, setActionDeadline] = useState<number | null>(null);
@@ -226,6 +272,25 @@ export function useGameSocket({
         // The seat is given up. Release whoever is waiting on `leave()`.
         if (msg.type === "left") {
           leaveAckRef.current?.();
+          return;
+        }
+
+        // The room's backlog, sent on every join. It replaces what we hold
+        // rather than adding to it: it is the whole of what the room kept, so
+        // after a reconnect appending would show the last minutes twice.
+        if (msg.type === "chatHistory") {
+          const history = Array.isArray(msg.messages)
+            ? msg.messages
+                .map(toChatMessage)
+                .filter((m): m is ChatMessage => m !== null)
+            : [];
+          setChatMessages(history.slice(-CHAT_KEEP));
+          return;
+        }
+
+        if (msg.type === "chat") {
+          const message = toChatMessage(msg);
+          if (message) setChatMessages((prev) => [...prev, message].slice(-CHAT_KEEP));
           return;
         }
 
@@ -409,12 +474,30 @@ export function useGameSocket({
     );
   }, []);
 
+  const sendChat = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !joinedRef.current) {
+      setError("Not connected to the table");
+      return;
+    }
+    // Nothing is added to `chatMessages` here. The line appears when the
+    // server sends it back to the whole room, in the room's order.
+    socket.send(
+      JSON.stringify({ type: "chat", text: trimmed.slice(0, CHAT_MAX_LENGTH) }),
+    );
+  }, []);
+
   return {
     state,
     connected: status === "connected",
     error,
     status,
+    chatMessages,
     sendAction,
+    sendChat,
     leave,
     actionDeadline,
     actionTimeoutMs,

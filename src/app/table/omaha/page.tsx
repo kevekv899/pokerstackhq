@@ -557,7 +557,10 @@ function OmahaTableContent() {
   const cashoutDoneRef = useRef(false);
 
   // ── The one source of game truth ──
-  const { state, error, status, sendAction, leave, actionDeadline, actionTimeoutMs } = useGameSocket({
+  const {
+    state, error, status, chatMessages, sendAction, sendChat, leave,
+    actionDeadline, actionTimeoutMs,
+  } = useGameSocket({
     tableId,
     buyIn: BUY_IN_CHIPS,
     enabled: seatReady,
@@ -1364,7 +1367,13 @@ function OmahaTableContent() {
         </aside>
 
         {/* ── Live chat ── */}
-        <ChatSidebar game={chatGame} heroAvatar={hero ? avatarFor(hero.id) : AVATARS[0]} />
+        <ChatSidebar
+          game={chatGame}
+          chatMessages={chatMessages}
+          viewerId={state?.viewerId ?? null}
+          avatarFor={avatarFor}
+          onSend={sendChat}
+        />
       </div>
 
       {/* Responsible gaming footer */}

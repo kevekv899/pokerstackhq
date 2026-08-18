@@ -44,6 +44,31 @@ const CLIENT_ACTIONS: ReadonlySet<string> = new Set<ActionType>([
   'ALL_IN',
 ]);
 
+/**
+ * Chat limits. Enforced here and nowhere else that matters: the input's own
+ * `maxlength` is a courtesy to whoever is typing, not a control — anything
+ * holding a socket can send whatever it likes.
+ */
+export const CHAT_MAX_LENGTH = 200;
+/** How much backlog a room keeps, and hands to whoever joins next. */
+export const CHAT_HISTORY_LIMIT = 50;
+/** At most this many messages per user per window; the rest are dropped. */
+export const CHAT_RATE_LIMIT = 5;
+export const CHAT_RATE_WINDOW_MS = 10_000;
+
+/**
+ * A chat line as it goes out on the wire.
+ *
+ * `username` and `at` are stamped by the room, never copied off the incoming
+ * message — see `chat()`.
+ */
+export interface ChatMessage {
+  userId: string;
+  username: string;
+  text: string;
+  at: number;
+}
+
 /** The slice of a WebSocket the room needs. Keeps rooms testable without ws. */
 export interface RoomSocket {
   send(data: string): void;
@@ -77,6 +102,20 @@ export class Room {
   /** Asked to leave while a hand was live; unseated once it finishes. */
   private readonly leaving = new Set<string>();
 
+  /**
+   * Display names as the *session* gave them, userId -> username. The only
+   * source of a name on a chat line; nothing a client sends is consulted.
+   */
+  private readonly names = new Map<string, string>();
+  /** The last `CHAT_HISTORY_LIMIT` messages, oldest first. Memory only. */
+  private readonly chatHistory: ChatMessage[] = [];
+  /**
+   * Send times inside the current window, userId -> epoch ms. Deliberately
+   * kept after a player leaves: forgetting it would make leaving and rejoining
+   * a way to buy a fresh allowance. At most `CHAT_RATE_LIMIT` numbers per user.
+   */
+  private readonly chatTimes = new Map<string, number[]>();
+
   private readonly clock: ActionClock;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly showdownRevealMs: number;
@@ -107,7 +146,12 @@ export class Room {
    */
   join(userId: string, name: string, socket: RoomSocket, buyIn: number): void {
     this.sockets.set(userId, socket);
+    this.names.set(userId, name);
     this.leaving.delete(userId);
+
+    // Before anything that can return early: someone who finds the table full,
+    // or who is reconnecting, still gets the room's recent context.
+    this.sendChatHistory(userId);
 
     if (this.seats.has(userId)) {
       // Reconnect: their seat is still live, just re-point the socket.
@@ -246,6 +290,91 @@ export class Room {
 
     this.clock.clear();
     this.afterChange();
+  }
+
+  // -------------------------------------------------------------------------
+  // Chat
+  // -------------------------------------------------------------------------
+
+  /**
+   * Takes a chat line from `userId` and gives it to the whole room.
+   *
+   * The *only* thing taken from the client is the text. The name on the line
+   * and the time on it are the server's: a client that could supply either
+   * could post as another player at the table, or reorder the log by lying
+   * about when it spoke.
+   *
+   * Every rejection goes to that one socket and nothing is broadcast — a
+   * message that breaks the rules is dropped, not delivered as an apology to
+   * everyone else.
+   */
+  chat(userId: string, text: unknown): void {
+    if (!this.sockets.has(userId)) {
+      this.error(userId, 'UNKNOWN_PLAYER', 'You are not at this table');
+      return;
+    }
+    if (typeof text !== 'string') {
+      this.error(userId, 'BAD_MESSAGE', 'chat needs a text string');
+      return;
+    }
+
+    const trimmed = text.trim();
+    if (trimmed.length === 0) {
+      this.error(userId, 'EMPTY_MESSAGE', 'Nothing to say');
+      return;
+    }
+    if (trimmed.length > CHAT_MAX_LENGTH) {
+      this.error(
+        userId,
+        'MESSAGE_TOO_LONG',
+        `Keep it to ${CHAT_MAX_LENGTH} characters or fewer`,
+      );
+      return;
+    }
+    // Last, so a rejected message never costs the sender part of their
+    // allowance — only messages that are actually delivered do.
+    if (!this.allowChat(userId)) {
+      this.error(userId, 'RATE_LIMITED', 'You are sending messages too quickly');
+      return;
+    }
+
+    const message: ChatMessage = {
+      userId,
+      username: this.names.get(userId) ?? userId,
+      text: trimmed,
+      at: Date.now(),
+    };
+
+    this.chatHistory.push(message);
+    if (this.chatHistory.length > CHAT_HISTORY_LIMIT) {
+      this.chatHistory.splice(0, this.chatHistory.length - CHAT_HISTORY_LIMIT);
+    }
+
+    for (const [id] of this.sockets) this.push(id, { type: 'chat', ...message });
+  }
+
+  /**
+   * Whether `userId` may send right now, counting a send if so. A sliding
+   * window rather than a fixed one, so a burst cannot straddle a boundary and
+   * land twice the allowance in a moment.
+   */
+  private allowChat(userId: string): boolean {
+    const now = Date.now();
+    const recent = (this.chatTimes.get(userId) ?? []).filter(
+      (at) => now - at < CHAT_RATE_WINDOW_MS,
+    );
+    if (recent.length >= CHAT_RATE_LIMIT) {
+      this.chatTimes.set(userId, recent);
+      return false;
+    }
+    recent.push(now);
+    this.chatTimes.set(userId, recent);
+    return true;
+  }
+
+  /** The backlog, so a joiner arrives mid-conversation rather than at silence. */
+  private sendChatHistory(userId: string): void {
+    this.push(userId, { type: 'chatHistory', messages: this.chatHistory });
   }
 
   // -------------------------------------------------------------------------

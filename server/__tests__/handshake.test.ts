@@ -118,6 +118,44 @@ describe('leaving over the wire', () => {
   });
 });
 
+describe('chat over the wire', () => {
+  it('reaches the other player under the sender’s real name', async () => {
+    const alice = await connect();
+    const bob = await connect();
+    await authenticate(alice, await signPsToken({ userId: 21, username: 'alice' }));
+    await authenticate(bob, await signPsToken({ userId: 22, username: 'bob' }));
+
+    for (const socket of [alice, bob]) {
+      socket.send(JSON.stringify({ type: 'join', tableId: 'chat-wire', buyIn: 200 }));
+      await waitFor(socket, 'state');
+    }
+
+    const heard = waitFor(bob, 'chat');
+    // The impersonation attempt: a client naming itself someone else, and
+    // backdating the line so it sorts above what is already there.
+    alice.send(JSON.stringify({
+      type: 'chat',
+      text: 'nice hand',
+      userId: '22',
+      username: 'bob',
+      at: 0,
+    }));
+
+    const line = await heard;
+    expect(line).toMatchObject({ type: 'chat', userId: '21', username: 'alice', text: 'nice hand' });
+    expect(line.at).toBeGreaterThan(0);
+  });
+
+  it('refuses a chat message from a socket that has not joined a table', async () => {
+    const socket = await connect();
+    await authenticate(socket, await signPsToken({ userId: 23, username: 'lurker' }));
+
+    socket.send(JSON.stringify({ type: 'chat', text: 'anyone there?' }));
+
+    expect(await waitFor(socket, 'error')).toMatchObject({ code: 'UNKNOWN_PLAYER' });
+  });
+});
+
 describe('table variant', () => {
   it('runs Omaha rules for an omaha table id, and Hold’em otherwise', async () => {
     // The variant is derived from the id server-side; a client cannot ask for
