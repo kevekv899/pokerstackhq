@@ -68,6 +68,7 @@ export {
 export {
   HandRank,
   HOLE_CARDS,
+  isTournamentTableId,
   PokerError,
   RANK_VALUE,
   RANKS,

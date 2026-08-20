@@ -185,6 +185,24 @@ export function variantForTableId(tableId: string): GameVariant {
   return tableId.toLowerCase().startsWith('omaha') ? 'OMAHA' : 'HOLDEM';
 }
 
+/** Prefixes that name a tournament table rather than a cash one. */
+const TOURNAMENT_PREFIXES = ['tournament', 'tourney', 'sitgo', 'sit-and-go', 'sng'];
+
+/**
+ * Whether this id names a tournament table.
+ *
+ * Tournaments are closed: they used to run entirely in the browser, dealing
+ * every player's cards into every player's bundle, and have not been rebuilt on
+ * the server yet. Without this, an id like `tournament-1` would fall through
+ * `variantForTableId` to HOLDEM and quietly open a *cash* room — real chips, a
+ * real buy-in — for someone who asked for a tournament. The server refuses the
+ * join instead (see the `join` handler in server/index.ts).
+ */
+export function isTournamentTableId(tableId: string): boolean {
+  const id = tableId.toLowerCase();
+  return TOURNAMENT_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
 export type Street =
   | 'WAITING'
   | 'PREFLOP'

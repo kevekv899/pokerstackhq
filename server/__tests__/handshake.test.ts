@@ -156,6 +156,36 @@ describe('chat over the wire', () => {
   });
 });
 
+describe('tournament tables', () => {
+  it('refuses the join instead of seating them at a cash table', async () => {
+    // Tournaments are closed. The danger is not the refusal but the fallback:
+    // an unrecognised id otherwise opens a Hold'em cash room, so someone
+    // asking for a tournament would be sat down for real chips.
+    for (const tableId of ['tournament-1', 'sitgo-4', 'SNG-9']) {
+      const socket = await connect();
+      await authenticate(socket, await signPsToken({ userId: 31, username: 'entrant' }));
+      socket.send(JSON.stringify({ type: 'join', tableId, buyIn: 200 }));
+
+      expect(await waitFor(socket, 'error'), tableId).toMatchObject({
+        code: 'TOURNAMENT_CLOSED',
+      });
+      // No seat, no table, nothing to look at.
+      await expect(waitFor(socket, 'state', 250)).rejects.toThrow();
+    }
+  });
+
+  it('leaves the session attached to no room at all', async () => {
+    const socket = await connect();
+    await authenticate(socket, await signPsToken({ userId: 32, username: 'entrant' }));
+    socket.send(JSON.stringify({ type: 'join', tableId: 'tournament-2', buyIn: 200 }));
+    await waitFor(socket, 'error');
+
+    // If a room had been created and attached, this would be NOT_YOUR_TURN.
+    socket.send(JSON.stringify({ type: 'action', action: 'CHECK' }));
+    expect(await waitFor(socket, 'error')).toMatchObject({ code: 'UNKNOWN_PLAYER' });
+  });
+});
+
 describe('table variant', () => {
   it('runs Omaha rules for an omaha table id, and Hold’em otherwise', async () => {
     // The variant is derived from the id server-side; a client cannot ask for

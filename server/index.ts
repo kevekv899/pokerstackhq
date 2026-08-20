@@ -8,6 +8,7 @@ import { encodeSecret, verifySessionToken } from './auth.js';
 import { isOriginAllowed } from './origin.js';
 import { Room } from './room.js';
 import { roomFor } from './rooms.js';
+import { isTournamentTableId } from '../src/lib/poker/index.js';
 
 // This project keeps its vars in `.env.local` (Next.js convention), so plain
 // `dotenv/config` would find nothing. Real env vars always win over both files.
@@ -193,6 +194,18 @@ wss.on('connection', (socket: WebSocket) => {
         const buyIn = typeof msg.buyIn === 'number' ? msg.buyIn : 0;
         if (!tableId) {
           send(sock, { type: 'error', code: 'BAD_MESSAGE', message: 'join needs a tableId' });
+          return;
+        }
+        // Tournaments are closed. Refused here rather than left to `roomFor`,
+        // which would read the id as a cash table and seat them at one — real
+        // chips, real buy-in — for a tournament that does not exist. No room is
+        // created and the session stays unattached.
+        if (isTournamentTableId(tableId)) {
+          send(sock, {
+            type: 'error',
+            code: 'TOURNAMENT_CLOSED',
+            message: 'Tournaments are not open yet',
+          });
           return;
         }
         sess.room = roomFor(tableId);

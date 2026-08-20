@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { disposeAllRooms, roomFor } from '../rooms.js';
 import type { RoomSocket } from '../room.js';
+import { isTournamentTableId } from '../../src/lib/poker/index.js';
 import {
   HOLDEM_TABLE_ID,
   OMAHA_TABLE_ID,
@@ -84,6 +85,18 @@ describe('the id a table page joins', () => {
     expect(tableIdFor('HOLDEM', OMAHA_TABLE_ID)).toBe(HOLDEM_TABLE_ID);
 
     expect(joinTable(tableIdFor('OMAHA', '4822')).holeCards).toHaveLength(4);
+  });
+
+  it('is never a tournament id — those are recognised, not defaulted', () => {
+    // `variantForTableId` reads anything it does not know as Hold'em, which is
+    // the right default for a cash table and exactly the wrong one for a
+    // tournament: it would open a real-chip room. These are spotted first.
+    for (const tableId of ['tournament-1', 'Tourney-2', 'sitgo-3', 'sit-and-go-4', 'SNG-5']) {
+      expect(isTournamentTableId(tableId), tableId).toBe(true);
+    }
+    for (const tableId of [HOLDEM_TABLE_ID, OMAHA_TABLE_ID, 'kitchen-table', '']) {
+      expect(isTournamentTableId(tableId), tableId).toBe(false);
+    }
   });
 
   it('honours a `?table=` override that runs the page’s own variant', () => {

@@ -127,7 +127,10 @@
       "Bash(pkill -f \"server/dist/server/index.js\")",
       "Bash(rm -f /tmp/stamp.log /tmp/stamp2.log)",
       "Bash(echo \"tsc=$?\")",
-      "Bash(echo \"server build=$?\")"
+      "Bash(echo \"server build=$?\")",
+      "Bash(curl -s -o /dev/null -w \"\" http://127.0.0.1:3987/tournaments)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" http://127.0.0.1:3987/tournament/42)",
+      "Bash(curl -s http://127.0.0.1:3987/tournaments)"
     ]
   }
 }
