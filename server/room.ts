@@ -26,7 +26,17 @@ import {
   type GameVariant,
   type TableState,
 } from '../src/lib/poker/index.js';
+import { randomUUID } from 'node:crypto';
+
 import { ActionClock } from './clock.js';
+import {
+  defaultHandWriter,
+  persistHand,
+  type HandActionRecord,
+  type HandPlayerRecord,
+  type HandRecord,
+  type HandWriter,
+} from './persistence.js';
 
 /** How long clients get to animate the reveal before chips move. */
 export const SHOWDOWN_REVEAL_MS = 4000;
@@ -69,6 +79,15 @@ export interface ChatMessage {
   at: number;
 }
 
+/**
+ * The engine keys players by string; the database keys them by the app's
+ * numeric user id. Returns null for anything that is not one, which is the
+ * room's cue not to write the hand at all.
+ */
+function numericUserId(playerId: string): number | null {
+  return /^\d+$/.test(playerId) ? Number(playerId) : null;
+}
+
 /** The slice of a WebSocket the room needs. Keeps rooms testable without ws. */
 export interface RoomSocket {
   send(data: string): void;
@@ -87,6 +106,29 @@ export interface RoomOptions {
   showdownRevealMs?: number;
   /** How long each decision gets. Shortened in tests. */
   actionTimeoutMs?: number;
+  /**
+   * Where finished hands are written. Defaults to the process-wide Supabase
+   * writer, which is a no-op when the server has no credentials.
+   */
+  handWriter?: HandWriter;
+}
+
+/** What the room remembers about a player from the moment they were dealt in. */
+interface HandSeatSnapshot {
+  playerId: string;
+  seat: number;
+  position: string;
+  startingStack: number;
+}
+
+/** A history event with the time the room saw it, before it is keyed by user. */
+interface LoggedEvent {
+  seq: number;
+  playerId: string | null;
+  street: string;
+  action: string;
+  amount: number;
+  at: string;
 }
 
 export class Room {
@@ -116,6 +158,19 @@ export class Room {
    */
   private readonly chatTimes = new Map<string, number[]>();
 
+  /**
+   * Hand history. Filled as the hand runs, written once when it ends — see
+   * `writeHandHistory`. Nothing in here is ever read back into the game: the
+   * chips in `state` stay authoritative whatever the database is doing.
+   */
+  private readonly handWriter: HandWriter;
+  /** When the current hand was dealt, or null between hands. */
+  private handStartedAt: number | null = null;
+  /** Seat, position and stack for each player dealt into the current hand. */
+  private handSeats: HandSeatSnapshot[] = [];
+  /** Every history event so far this hand, stamped when the room saw it. */
+  private eventLog: LoggedEvent[] = [];
+
   private readonly clock: ActionClock;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly showdownRevealMs: number;
@@ -125,6 +180,7 @@ export class Room {
   constructor(options: RoomOptions) {
     this.tableId = options.tableId;
     this.showdownRevealMs = options.showdownRevealMs ?? SHOWDOWN_REVEAL_MS;
+    this.handWriter = options.handWriter ?? defaultHandWriter();
     this.clock = new ActionClock(options.actionTimeoutMs);
     this.state = createTable({
       tableId: options.tableId,
@@ -407,6 +463,9 @@ export class Room {
       return;
     }
 
+    // Before the blinds go in, so the recorded stacks are what each player sat
+    // down with this hand, and while `pendingBlinds` still says who posts what.
+    this.snapshotHandStart();
     this.postPendingBlinds();
     this.afterChange();
   }
@@ -481,6 +540,11 @@ export class Room {
 
   /** PAYOUT -> WAITING, plus the housekeeping the engine does not do. */
   private finishHand(): void {
+    // The hand is complete and `state` still holds all of it — board, pots,
+    // hole cards, committed chips. `endHand` below clears every one of those,
+    // so this is the moment, and the only one, that it can be written.
+    this.writeHandHistory();
+
     const result = this.state.result;
     for (const [userId] of this.sockets) {
       this.push(userId, {
@@ -505,6 +569,189 @@ export class Room {
 
     this.broadcast();
     this.maybeStartHand();
+  }
+
+  // -------------------------------------------------------------------------
+  // Hand history
+  //
+  // Recording only. Nothing below may change `state`, and nothing above may
+  // wait on it: a hand plays out identically whether these writes land or not.
+  // -------------------------------------------------------------------------
+
+  /** Opens a new hand's record: who is in it, where, and with how much. */
+  private snapshotHandStart(): void {
+    this.handStartedAt = Date.now();
+    this.eventLog = [];
+    this.handSeats = [];
+
+    const positions = this.positions();
+    for (const seat of this.state.seats) {
+      const player = seat.player;
+      if (!player || player.status === 'SITTING_OUT') continue;
+      this.handSeats.push({
+        playerId: player.id,
+        seat: seat.index,
+        position: positions.get(player.id) ?? '',
+        startingStack: player.stack,
+      });
+    }
+  }
+
+  /**
+   * Table position per player, clockwise from the button.
+   *
+   * The blinds come from `pendingBlinds` rather than from counting seats,
+   * because the engine is the one that decided them and heads-up disagrees
+   * with the count: there the button posts the small blind.
+   */
+  private positions(): Map<string, string> {
+    const seats = this.state.seats;
+    const count = seats.length;
+    const order: string[] = [];
+    for (let step = 1; step <= count; step += 1) {
+      const player = seats[(this.state.buttonIndex + step) % count].player;
+      if (player && player.status !== 'SITTING_OUT') order.push(player.id);
+    }
+
+    const out = new Map<string, string>();
+    const last = order.length - 1;
+    order.forEach((playerId, i) => {
+      // `order` starts one seat past the button, so the button is last.
+      if (i === last) out.set(playerId, 'BTN');
+      else if (i === 0) out.set(playerId, 'SB');
+      else if (i === 1) out.set(playerId, 'BB');
+      else if (i === last - 1) out.set(playerId, 'CO');
+      else if (i === 2) out.set(playerId, 'UTG');
+      else out.set(playerId, `UTG+${i - 2}`);
+    });
+
+    for (const blind of this.state.pendingBlinds) {
+      const existing = out.get(blind.playerId);
+      if (blind.kind === 'SMALL') {
+        out.set(blind.playerId, existing === 'BTN' ? 'BTN/SB' : 'SB');
+      } else {
+        out.set(blind.playerId, 'BB');
+      }
+    }
+    return out;
+  }
+
+  /** Stamps every history event the room has not logged yet. */
+  private captureEvents(): void {
+    if (this.handStartedAt === null) return;
+    const history = this.state.history;
+    for (let seq = this.eventLog.length; seq < history.length; seq += 1) {
+      const event = history[seq];
+      this.eventLog.push({
+        seq,
+        playerId: event.playerId,
+        street: event.street,
+        action: event.type,
+        amount: event.amount ?? 0,
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
+  /**
+   * Sends the finished hand to the writer and forgets it.
+   *
+   * Called once per hand: `handStartedAt` is cleared first, so a second call
+   * (or a hand that somehow reaches PAYOUT twice) cannot write it again.
+   */
+  private writeHandHistory(): void {
+    this.captureEvents();
+    const startedAt = this.handStartedAt;
+    if (startedAt === null) return;
+    this.handStartedAt = null;
+
+    const record = this.buildHandRecord(startedAt);
+    this.handSeats = [];
+    this.eventLog = [];
+    if (record) persistHand(this.handWriter, record);
+  }
+
+  /**
+   * The hand as it will be stored, or null if any part of it cannot be — an
+   * unseated player, a user id that is not a number. Null means nothing is
+   * written at all: a hand missing a player looks whole to whoever reads it
+   * later and quietly misstates what happened.
+   */
+  private buildHandRecord(startedAt: number): HandRecord | null {
+    const result = this.state.result;
+    if (!result) return null;
+
+    const label = `${this.tableId}#${this.state.handId}`;
+    const players: HandPlayerRecord[] = [];
+
+    for (const snapshot of this.handSeats) {
+      const userId = numericUserId(snapshot.playerId);
+      if (userId === null) {
+        console.warn(`[room ${this.tableId}] hand ${label} not recorded: non-numeric player id`);
+        return null;
+      }
+
+      const player = this.state.seats[snapshot.seat]?.player;
+      if (!player || player.id !== snapshot.playerId) {
+        console.warn(`[room ${this.tableId}] hand ${label} not recorded: seat ${snapshot.seat} moved`);
+        return null;
+      }
+
+      const won = result.payouts[player.id] ?? 0;
+      const shown = result.showdown?.find((entry) => entry.playerId === player.id) ?? null;
+
+      players.push({
+        userId,
+        seat: snapshot.seat,
+        position: snapshot.position || null,
+        holeCards: player.holeCards,
+        startingStack: snapshot.startingStack,
+        committed: player.totalCommitted,
+        net: won - player.totalCommitted,
+        result: won > 0 ? 'WON' : player.status === 'FOLDED' ? 'FOLDED' : 'LOST',
+        handName: shown?.hand.name ?? null,
+      });
+    }
+
+    const actions: HandActionRecord[] = [];
+    for (const event of this.eventLog) {
+      // A null actor is the table itself dealing or turning a street; only a
+      // player id that should be there and is not is a reason to give up.
+      let userId: number | null = null;
+      if (event.playerId !== null) {
+        userId = numericUserId(event.playerId);
+        if (userId === null) {
+          console.warn(`[room ${this.tableId}] hand ${label} not recorded: non-numeric actor`);
+          return null;
+        }
+      }
+      actions.push({
+        seq: event.seq,
+        userId,
+        street: event.street,
+        action: event.action,
+        amount: event.amount,
+        at: event.at,
+      });
+    }
+
+    return {
+      id: randomUUID(),
+      tableId: this.tableId,
+      variant: this.state.variant,
+      handNumber: this.state.handId,
+      startedAt: new Date(startedAt).toISOString(),
+      endedAt: new Date().toISOString(),
+      board: this.state.board,
+      // The awarded pots rather than the raw ones: same totals, plus who won
+      // each, which is what makes the row worth reading.
+      pots: result.pots,
+      // No rake is taken yet. The column exists so taking one later does not
+      // need a migration.
+      rake: 0,
+      players,
+      actions,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -564,6 +811,10 @@ export class Room {
   // -------------------------------------------------------------------------
 
   private broadcast(): void {
+    // Every state change in the room ends up here, which makes this the one
+    // place that catches every history event as it happens — and catching them
+    // as they happen is what puts a real time on each one.
+    this.captureEvents();
     for (const [userId] of this.sockets) this.sendTo(userId);
   }
 
